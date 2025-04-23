@@ -1,0 +1,35 @@
+---
+description: This rule prevents editing of .env files to protect sensitive configuration
+globs: .env
+alwaysApply: true
+---
+
+# No .env File Edits
+
+This rule prevents editing of .env files to protect sensitive configuration data and credentials.
+
+## Purpose
+- Protect sensitive configuration data
+- Prevent accidental exposure of credentials
+- Maintain security best practices
+
+## Implementation
+- Do not edit .env files directly
+- Use .env.example for template changes
+- Document environment variables in README
+- Never commit .env files to version control
+
+## Exceptions
+None. All .env file changes must be made manually by the user.
+
+## Alternative Approaches
+1. Create/update .env.example instead
+2. Document required variables in README
+3. Use secrets management system
+4. Use environment variables in deployment
+
+## Security Notes
+- .env files contain sensitive data
+- Credentials should never be exposed
+- Each environment should have its own .env
+- Keep .env in .gitignore

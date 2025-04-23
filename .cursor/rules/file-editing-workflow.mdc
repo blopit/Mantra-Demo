@@ -1,0 +1,50 @@
+---
+description: 
+globs: **/*
+alwaysApply: false
+---
+# File Editing Workflow
+
+## General File Editing Principles
+- Create one type of content per file to maintain organization
+- Use consistent formatting within each file type
+- When files fail to save properly, try alternative creation methods
+
+## MDC File Creation Process
+DO NOT USE edit_tool tool with .mdc files specifcially use `cat`
+
+## Chunked Echo Approach for Large Files
+1. Create base file with first chunk:
+   ```
+   echo -e '# Title\n\ndescription: "Description text"\n\n## First Section\n- Bullet point' > filename.mdc
+   ```
+2. Add subsequent chunks:
+   ```
+   echo -e '\n\n## Second Section\n- More content' >> filename.mdc
+   ```
+3. Set permissions after all chunks:
+   ```
+   chmod 644 filename.mdc
+   ```
+4. Always verify content is complete: `cat filename.mdc`
+
+## JSON File Editing
+1. Validate existing JSON structure before editing
+2. Maintain proper indentation (2 spaces) and formatting
+3. Use the edit_file tool for most JSON edits
+4. For complex JSON files, validate after editing
+5. Set proper permissions after editing
+
+## Handling Special File Types
+- For binary files: Use appropriate tools to modify
+- For configuration files: Always create backups before editing
+- For template files: Preserve placeholders during edits
+- For source code: Follow language-specific formatting conventions
+- For documentation: Follow established documentation structure
+
+## Troubleshooting File Creation Issues
+- If files appear corrupted, check terminal output for errors
+- For permission denied errors, verify directory permissions
+- If content is truncated, try the chunked approach
+- For MDC files specifically, check for YAML frontmatter validity
+- When all else fails, try creating file with basic echo then append content

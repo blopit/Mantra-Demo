@@ -1,0 +1,81 @@
+---
+description: Guidelines for maintaining and using current-task.md to track active development tasks
+globs: 
+alwaysApply: true
+---
+
+# Current Task Management
+
+## Purpose
+- Track the currently active development task
+- Maintain focus on immediate objectives
+- Provide clear context for ongoing work
+
+## Structure Requirements
+- Task title must be clear and specific
+- Current status must be maintained
+- Progress tracking must be included
+- Next steps must be listed
+- Dependencies must be documented
+
+## Format Rules
+1. Title section must start with "# Current Task:"
+2. Status must be one of: "Not Started", "In Progress", "Blocked", "Ready for Review"
+3. Progress must be tracked with checkboxes
+4. Next steps must be numbered
+5. All blockers must be documented with "!" prefix
+
+## Sections
+- Title (with task ID if applicable)
+- Status
+- Description
+- Current Progress
+- Next Steps
+- Blockers (if any)
+- Related Files
+- Notes
+
+## Usage Guidelines
+1. Update at the start of each new task
+2. Mark progress as items are completed
+3. Document blockers immediately when encountered
+4. Update status when transitioning between phases
+5. Clear and reset when starting new task
+
+## Example Format
+```markdown
+# Current Task: [Task Name]
+
+## Status: [Current Status]
+
+## Description
+[Clear description of the task]
+
+## Current Progress
+- [ ] Step 1
+- [x] Step 2
+- [ ] Step 3
+
+## Next Steps
+1. [Next immediate action]
+2. [Following action]
+3. [Future action]
+
+## Blockers
+! [Blocker description if any]
+
+## Related Files
+- [File path 1]
+- [File path 2]
+
+## Notes
+- [Important note 1]
+- [Important note 2]
+```
+
+## Maintenance Rules
+1. Keep the file focused on ONE task at a time
+2. Update progress in real-time
+3. Remove completed tasks before starting new ones
+4. Document any task transitions
+5. Reference relevant plan.md sections 

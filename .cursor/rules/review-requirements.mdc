@@ -1,0 +1,30 @@
+# AI vs Human Review Guidelines
+
+description: "Guidelines for determining whether a task can be reviewed by AI or requires human review"
+
+## AI Review Allowed When
+- Implementation is complete and verifiable through tests
+- All tests are passing
+- Changes follow established code patterns
+- No security-critical changes
+- No infrastructure or deployment changes
+- No changes to authentication flows (except bug fixes with tests)
+- No changes to data models affecting persistence
+- Changes are isolated to specific components
+
+## Human Review Required When
+- Security-related changes
+- Authentication flow modifications
+- Infrastructure or deployment changes
+- Database schema changes
+- API contract changes
+- UI/UX design changes
+- Performance-critical changes
+- Complex business logic changes
+- Cross-cutting changes affecting multiple systems
+
+## Review Process
+1. When a task moves to "Ready for Review", evaluate against these criteria
+2. Add a "Review Status" section indicating AI or human review requirement
+3. Document reasoning for the review type
+4. For human review, specify expertise areas needed

@@ -1,0 +1,12 @@
+---
+description: "Rule for handling mock data loading script"
+globs: **/load_mock_data.py
+alwaysApply: false
+---
+
+
+
+When modifying models or relationships:
+1. Update model_definitions/*.json files
+2. Run generate_all.py to regenerate models
+3. Then run load_mock_data.py

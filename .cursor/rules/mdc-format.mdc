@@ -1,0 +1,38 @@
+---
+description: MDC file format guidelines for creating and editing rule files
+globs: .cursor/rules/*.mdc
+alwaysApply: true
+---
+# MDC File Format Guidelines
+
+## File Structure
+- Start with YAML frontmatter containing description and globs
+- Use clear hierarchical headings with ## for sections
+- Include examples where appropriate
+- End file with newline
+
+## Format Requirements
+- No brackets or quotes around glob patterns
+- Keep description concise but clear
+- Use bullet points for readability
+- Format code examples with backticks
+- Keep content organized in logical sections
+
+## File Creation Process
+1. Create file using cat or echo commands
+2. Set permissions with chmod 644
+3. Verify content with cat
+4. Never use edit_file tool for .mdc files
+
+## Content Guidelines
+- One rule concept per file
+- Clear, actionable instructions
+- Include examples of correct/incorrect usage
+- Document any exceptions or special cases
+- Keep rules focused and specific
+
+## Validation
+- Verify YAML frontmatter syntax
+- Check glob patterns are valid
+- Ensure all sections are properly formatted
+- Test rule application scenarios

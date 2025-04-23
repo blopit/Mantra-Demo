@@ -1,0 +1,52 @@
+# JSON Formatting Standards
+
+description: "Standardized formatting rules for all game content JSON files"
+
+## General Formatting
+- Use snake_case for all IDs and filenames
+- Use 2 spaces for indentation
+- Limit line length to 120 characters maximum (80 recommended)
+- Use UTF-8 encoding with LF line endings
+- Maximum nesting level: 5
+- Follow proper JSON syntax (no trailing commas, no comments)
+
+globs: game/content/**/*.json
+alwaysApply: false
+
+## Required Universal Fields
+- `id`: Unique identifier in snake_case
+- `name`: Display name with proper capitalization
+- `description`: Brief description of the content
+
+## Array Formatting
+- Small arrays (≤3 simple values) can be on a single line
+- Large arrays must have one item per line
+- Example (acceptable): `"tags": ["fire", "destruction", "elemental"]`
+
+## Value Formats
+- Percentages: Use whole numbers (10 not 0.1)
+- Colors: Hexadecimal format (#FF5500)
+- Durations: Seconds as floating point (1.5)
+- Probabilities: Percentages as whole numbers (25 for 25%)
+
+## References
+- ID references must exactly match the referenced content ID
+- File references use relative paths from content root
+- Example: `"texture": "textures/items/sword_01.png"`
+
+## Reserved IDs
+Avoid using these reserved IDs:
+- none, all, default, custom, special, system, test, debug, example
+
+## Content-Specific Requirements
+Follow additional requirements specified for each content type:
+- skills: skillType, energyCost, cooldown
+- passives: activation, statsModifiers
+- items: itemType, tier, rarity, value
+- elements: opposingElements, synergizingElements, baseStats
+- biomes: spawnWeight, allowedEnemies, resources
+
+## Validation
+- All files must validate against their schema
+- Use schema validation during development
+- Reference schemas in game/content/meta/schemas/
