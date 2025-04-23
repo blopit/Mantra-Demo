@@ -1,0 +1,44 @@
+# Task Automation Rules
+
+## Purpose
+- Ensure maximum task automation
+- Minimize unnecessary human intervention
+- Clearly identify tasks requiring human action
+
+## Implementation
+- AI must attempt to automate all possible task aspects
+- Use available tools for planning, coding, testing, and fixing
+- Move tasks requiring human intervention to tasks/Human/
+
+## Task Execution Flow
+1. Planning Phase
+   - Break down task into steps
+   - Identify automatable components
+   - Flag human-required actions
+
+2. Automation Phase
+   - Use tools to implement solutions
+   - Run automated tests
+   - Document progress
+
+3. Human Intervention
+   - Create task in tasks/Human/ if needed
+   - Clearly specify required human actions
+   - Continue automation after human input
+
+## Task Location Rules
+- Fully automated tasks: Regular priority folders
+- Human-required tasks: tasks/Human/ directory
+- Mixed tasks: Both locations with cross-references
+
+## Required Tools Usage
+- Planning: Sequential thinking tool
+- Code: Edit and search tools
+- Testing: Test running tools
+- Fixing: Debugging tools
+- Documentation: File creation tools
+
+## No Exceptions
+- Never skip automation attempts
+- Always document automation decisions
+- Keep human intervention minimal

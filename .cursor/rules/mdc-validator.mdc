@@ -1,0 +1,35 @@
+---
+description: "Guidelines for validating MDC rule files"
+globs: .cursor/rules/*.mdc
+alwaysApply: false
+---
+# MDC File Validator
+
+## Required Fields
+- Every MDC file MUST have a filled description field
+- Every MDC file MUST have either globs pattern or alwaysApply set to true
+- Description should be concise but descriptive
+- If file applies to specific file types, use globs
+- If file should apply to all operations, use alwaysApply: true
+
+## Glob Pattern Format
+- NEVER use brackets around glob patterns
+- NEVER use quotes around glob patterns
+- Correct: `globs: path/to/*.extension`
+- Incorrect: `globs: [path/to/*.extension]`
+- Incorrect: `globs: "path/to/*.extension"`
+- Brackets or quotes will cause the rule to be invalid
+
+## Validation Checklist
+- [ ] description field is present and not empty
+- [ ] either globs pattern exists or alwaysApply: true is set
+- [ ] globs pattern has NO brackets or quotes
+- [ ] file has proper permissions (chmod 644)
+- [ ] content follows MDC format guidelines
+- [ ] file ends with a blank newline
+
+## Implementation
+- Always check these requirements when creating or editing MDC files
+- Use chmod 644 before and after editing to ensure proper permissions
+- Verify all required fields are filled before considering the rule complete
+- Run `find .cursor/rules -name "*.mdc" -size 1c` to check for corrupted files

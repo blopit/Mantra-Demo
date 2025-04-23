@@ -1,0 +1,69 @@
+---
+description: Guidelines for when and how to split code files to maintain modularity and clarity
+globs: 
+alwaysApply: false
+---
+description: Guidelines for when and how to split code files to maintain modularity and clarity
+globs: *.js, *.jsx, *.ts, *.tsx, *.py, *.rb
+alwaysApply: true
+
+# Code Splitting Guidelines
+
+## Core Principles
+- Split code files when they cross natural boundaries of responsibility
+- Keep modules focused and single-purpose
+- Maintain clear separation between UI, business logic, and data processing
+
+## When to Split Files
+
+### 1. Separation of Concerns
+- Split when a file handles multiple unrelated responsibilities
+- Each module should have a clear, single purpose
+- Separate UI components from business logic
+- Isolate data processing from presentation logic
+
+### 2. File Size and Complexity
+- Split files exceeding 300-500 lines of code
+- Break down complex functions into separate utility files
+- Separate configuration from implementation
+- Create dedicated files for complex algorithms
+
+### 3. Reusability
+- Isolate reusable components into their own files
+- Create separate utility files for shared functions
+- Extract common interfaces/types into dedicated files
+- Maintain a clear import/export structure
+
+### 4. Team Collaboration
+- Split files that are frequently edited by multiple team members
+- Create separate modules for different feature areas
+- Maintain clear boundaries between team responsibilities
+- Use clear file naming conventions
+
+### 5. Testing and Debugging
+- Separate test files from implementation
+- Create dedicated mock/fixture files
+- Split complex features for easier unit testing
+- Maintain clear test organization
+
+## Examples
+
+Correct (Split Files):
+```javascript
+// userAPI.js
+export const fetchUser = async (id) => { /* ... */ }
+
+// UserProfile.js
+import { fetchUser } from './userAPI'
+
+export const UserProfile = ({ id }) => { /* ... */ }
+```
+
+Incorrect (Mixed Concerns):
+```javascript
+// userEverything.js
+const fetchUser = async (id) => { /* ... */ }
+const UserProfile = ({ id }) => { /* ... */ }
+const userValidation = { /* ... */ }
+const UserSettings = { /* ... */ }
+```

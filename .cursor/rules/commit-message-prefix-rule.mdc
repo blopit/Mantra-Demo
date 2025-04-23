@@ -1,0 +1,35 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Commit Message Prefix Rule
+
+description: "This rule ensures all commit messages are prefixed with [Cursor]"
+alwaysApply: "true"
+
+## Purpose
+
+This rule enforces a consistent commit message format to make the repository history more organized and easier to navigate.
+
+## Requirements
+
+- All commit messages must be prefixed with [Cursor]
+- The prefix should be followed by a space and then the actual commit message
+- The commit message should be descriptive and summarize the changes made
+
+## Examples
+
+Good commit messages:
+- [Cursor] Fix foreign key references in model relationships
+- [Cursor] Add new feature for user authentication
+- [Cursor] Refactor database connection handling
+
+Bad commit messages:
+- Fix bug
+- Updated code
+- [cursor] lowercase prefix
+
+## Application
+
+Apply this rule to all git commits

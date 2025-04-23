@@ -1,0 +1,45 @@
+# Model Relationships Rules
+
+description: "Rules for defining and generating SQLAlchemy model relationships"
+
+## Relationship Definition in JSON
+
+### Required Fields
+- target_class: The class name of the related model
+- back_populates: The attribute name on the related model
+
+### Optional Fields
+- uselist: Boolean indicating if this is a one-to-many relationship (default: true)
+- cascade: String specifying SQLAlchemy cascade rules
+- lazy: String specifying loading strategy (default: "select")
+- nullable: Boolean indicating if the relationship can be null
+
+### Example
+```json
+"relationships": {
+  "user": {
+    "target_class": "User",
+    "back_populates": "notices",
+    "nullable": true
+  }
+}
+```
+
+## Template Generation Rules
+
+### Model Template
+- Always include target_class in relationship definition
+- Use back_populates for bidirectional relationships
+- Handle nullable relationships appropriately
+- Include proper imports for relationship types
+
+### Schema Template
+- Include relationship fields in response models
+- Handle nested relationships properly
+- Use proper Pydantic types for relationships
+
+## Code Generation
+- Generate through template manager only
+- Do not modify generated files directly
+- Update model definitions and templates instead
+- Re-generate when relationship definitions change

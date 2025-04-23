@@ -1,0 +1,49 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Mobile-First Game Design Philosophy
+
+## Overview
+This rule ensures our 3D Adventure Game follows mobile-first design principles, emphasizing touch controls and responsive UI that works across all devices.
+
+## Requirements
+
+### Touch Controls
+- All interactive elements must be accessible via touch
+- Touch targets should be large (minimum 44×44 pixels)
+- Implement touch-friendly controls for movement and camera manipulation
+- Avoid requiring pinch gestures for essential functions
+- Use swipe gestures for intuitive camera rotation
+
+### Responsive Design
+- UI elements must scale appropriately on all screen sizes
+- Buttons and controls should be positioned to avoid thumb obstruction
+- Use viewport-relative units instead of fixed pixel values where appropriate
+- Test all features on mobile viewports first
+
+### Performance Considerations
+- Optimize rendering for mobile GPUs
+- Implement level-of-detail adjustments based on device capabilities
+- Minimize draw calls and polygon count
+- Batch similar materials to reduce state changes
+
+### Testing Guidelines
+- Test on actual mobile devices, not just emulators
+- Verify functionality works with touch-only input
+- Ensure comfortable one-handed operation where possible
+- Check performance metrics on lower-end devices
+
+## Implementation Notes
+When implementing new features, always consider the touch interface first, then adapt for keyboard/mouse as secondary input methods. Mobile performance constraints should guide architectural decisions.
+
+Touch gestures to implement:
+- Swipe (horizontal): Camera rotation
+- Swipe (vertical): Camera tilt
+- Tap: Select/Interact
+- Virtual joystick: Movement
+- Two-finger pinch (optional): Zoom in/out
+
+## Documentation
+Include mobile-specific instructions in all feature documentation and ensure the UI communicates touch interactions clearly to users. 

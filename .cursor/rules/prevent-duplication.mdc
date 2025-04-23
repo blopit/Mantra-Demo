@@ -1,0 +1,98 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+description: Guidelines for preventing code duplication and maintaining DRY principles
+globs: *.js, *.jsx, *.ts, *.tsx, *.py, *.rb
+alwaysApply: true
+
+# Code Duplication Prevention
+
+## Core Principles
+- Follow DRY (Don't Repeat Yourself) principles
+- Create reusable modules and functions
+- Maintain single source of truth
+- Use automated tools to detect duplication
+
+## Implementation Strategies
+
+### 1. DRY Principle Application
+- Extract repeated code into reusable functions
+- Create shared utility modules
+- Use inheritance and composition effectively
+- Implement shared interfaces and types
+
+### 2. Modular Design
+- Organize code into clear, focused modules
+- Use proper import/export patterns
+- Create reusable components library
+- Maintain clear module boundaries
+
+### 3. Code Review Process
+- Review for potential duplications
+- Use pair programming when appropriate
+- Document common patterns and solutions
+- Share knowledge about existing utilities
+
+### 4. Automated Detection
+- Use linters to detect duplicates
+- Implement static code analysis
+- Set up CI/CD checks for duplication
+- Regular automated code audits
+
+### 5. Refactoring Guidelines
+- Regularly review and refactor code
+- Extract common patterns into utilities
+- Maintain comprehensive test coverage
+- Document refactoring decisions
+
+### 6. Documentation
+- Document reusable components
+- Maintain clear API documentation
+- Create usage examples
+- Keep documentation up-to-date
+
+## Examples
+
+Correct (DRY):
+```javascript
+// utils/validation.js
+export const validateEmail = (email) => {
+  const pattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+  return pattern.test(email)
+}
+
+// components/SignupForm.js
+import { validateEmail } from '../utils/validation'
+
+const SignupForm = () => {
+  const isValid = validateEmail(email)
+}
+
+// components/ContactForm.js
+import { validateEmail } from '../utils/validation'
+
+const ContactForm = () => {
+  const isValid = validateEmail(email)
+}
+```
+
+Incorrect (WET - Write Everything Twice):
+```javascript
+// SignupForm.js
+const SignupForm = () => {
+  const validateEmail = (email) => {
+    const pattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    return pattern.test(email)
+  }
+}
+
+// ContactForm.js
+const ContactForm = () => {
+  const validateEmail = (email) => {
+    const pattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    return pattern.test(email)
+  }
+}
+```

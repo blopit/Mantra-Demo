@@ -1,0 +1,9 @@
+description: |
+  The application runs two servers:
+  1. Main FastAPI server (app.py) - Runs on port 8000
+  2. WebSocket chat server (src/websockets/chat_server.py) - Runs on port 8765
+  
+  The frontend WebSocket connection should always connect to port 8765 for chat functionality.
+  The main API endpoints should connect to port 8000.
+
+alwaysApply: true 

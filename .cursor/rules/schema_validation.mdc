@@ -1,0 +1,80 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Schema Validation Rules
+
+description: "Automated schema validation rules for game content files"
+
+## Overview
+Defines automated schema validation for content files to ensure consistency and prevent errors across the game content.
+
+globs: [game/content/**/*.json]
+alwaysApply: false
+
+## Schema Organization
+- All schemas must be located in `game/content/meta/schemas/` directory
+- Each content type should have its own schema file named `{contentType}.schema.json`
+- Use JSON Schema Draft-07 format for all schema definitions
+
+## Required Schema Components
+- Every schema must validate:
+  - Required fields for its content type
+  - Proper data types for each field
+  - Value ranges and allowed values
+  - Relationship requirements with other content
+  - Content format restrictions
+
+## Schema Structure
+```json
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ContentType Schema",
+  "description": "Validates ContentType JSON files",
+  "type": "object",
+  "required": ["id", "name", "description"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9_]+$",
+      "description": "Unique identifier in snake_case"
+    },
+    "name": {
+      "type": "string",
+      "maxLength": 50,
+      "description": "Display name with proper capitalization"
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 500,
+      "description": "Clear explanation of the content"
+    }
+  }
+}
+```
+
+## Validation Process
+- All content must pass schema validation before being included in builds
+- Validation occurs during content loading and when files are modified
+- Custom validation functions can supplement schema validation for complex rules
+- Schema errors are reported with clear messages indicating the issue
+
+## Schema Registry
+- Schema files must be registered in `game/content/meta/schema_registry.json`
+- The registry maps glob patterns to schema files
+- Multiple content types can use the same schema if appropriate
+- Custom validation functions are also registered here
+
+## Implementation Requirements
+- Create schemas for: items, skills, classes, biomes, quests, NPCs
+- Update existing content to conform to schemas
+- Add pre-commit hooks for schema validation
+- Integrate schema validation with the content pipeline
+
+## Best Practices
+- Keep schemas as simple as possible while ensuring data integrity
+- Document all schema properties with clear descriptions
+- Prefer enums over open strings when possible
+- Use schema composition to reuse common patterns
+- Update schemas when content requirements change 

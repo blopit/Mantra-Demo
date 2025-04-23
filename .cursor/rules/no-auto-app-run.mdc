@@ -1,0 +1,29 @@
+---
+description: "This rule prevents running the application without explicit user permission"
+alwaysApply: true
+---
+
+# No Automatic App Running
+
+## Purpose
+- Prevent running the application without explicit user permission
+- Avoid port conflicts and multiple instances
+- Ensure user has control over app execution
+
+## Implementation
+- Never run the application automatically
+- Always ask for permission before running
+- Check if app is already running before suggesting to run
+
+## Exceptions
+None. All application runs must be explicitly requested by the user.
+
+## Alternative Approaches
+1. Suggest checking app status instead
+2. Provide instructions for manual startup
+3. Help with debugging without restarting
+
+## Safety Notes
+- Multiple instances can cause port conflicts
+- Unexpected restarts may disrupt active sessions
+- Always verify app status before suggesting actions

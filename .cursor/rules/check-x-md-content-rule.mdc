@@ -1,0 +1,6 @@
+---
+description: This rule reminds the AI to check the x.md file for the current file contents and implementations.
+globs: **/*.*
+alwaysApply: false
+---
+- Remember to check the plan.md file for the current file contents and implementations

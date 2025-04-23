@@ -1,0 +1,42 @@
+# Test Verification Rule
+
+description: "Always verify test fixes by re-running tests"
+globs: ["test_*.py"]
+alwaysApply: false
+
+## Purpose
+- Ensure test fixes are properly verified
+- Prevent incomplete or incorrect test fixes
+- Maintain test suite reliability
+
+## Requirements
+1. After any test file changes:
+   - Re-run the specific test file
+   - Re-run related test files
+   - Verify no regressions
+
+2. For test framework changes:
+   - Run the full test suite
+   - Check for side effects
+
+3. Document test results:
+   - Show pass/fail status
+   - Report any new failures
+   - Note any skipped tests
+
+## Implementation
+1. Run modified test file:
+   
+
+2. Run related tests:
+   
+
+3. For framework changes:
+   
+
+## Verification Steps
+1. Run tests immediately after changes
+2. Check test output carefully
+3. Address any new failures
+4. Document test results
+5. Only proceed if all tests pass
