@@ -47,8 +47,8 @@ class TestUseCredentials:
         mock_get_user_info.assert_called_once()
         mock_get_credentials.assert_called_once()
         mock_build.assert_called_once_with('gmail', 'v1', credentials=mock_credentials)
-        mock_service.users().getProfile.assert_called_once()
-        mock_service.users().messages().list.assert_called_once()
+        mock_service.users().getProfile().execute.assert_called_once()
+        mock_service.users().messages().list().execute.assert_called_once()
 
     @patch("src.examples.use_credentials.get_user_info_from_credentials")
     @patch("src.examples.use_credentials.get_credentials_object")
@@ -98,5 +98,5 @@ class TestUseCredentials:
         mock_get_user_info.assert_called_once()
         mock_get_credentials.assert_called_once()
         mock_build.assert_called_once_with('gmail', 'v1', credentials=mock_credentials)
-        mock_service.users().getProfile.assert_called_once()
+        mock_service.users().getProfile().execute.assert_called_once()
         mock_logger.error.assert_called_with("Error using credentials: API error")

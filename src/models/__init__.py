@@ -1,5 +1,5 @@
 """
-Models package initialization.
+This package contains the database models for the application.
 """
 
 from src.models.google_integration import GoogleIntegration
