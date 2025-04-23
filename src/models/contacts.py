@@ -8,14 +8,14 @@ from uuid import uuid4
 from sqlalchemy import Column, String, Float, DateTime, ForeignKey, Text, JSON
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
-from sqlalchemy.dialects.postgresql import UUID
 from src.models.base import Base
+from src.models.custom_types import UUIDType
 
 class Contacts(Base):
     """Contacts model representing connections to users"""
     __tablename__ = "contacts"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    id = Column(UUIDType, primary_key=True, default=uuid4)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     name = Column(String(100), nullable=False)
@@ -39,7 +39,7 @@ class Contacts(Base):
     relationship_summary = Column(Text)
     communication_style = Column(String(50))
     birthday = Column(String(20))
-    user_id = Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete="CASCADE"))
+    user_id = Column(UUIDType, ForeignKey('users.id', ondelete="CASCADE"))
 
     # Relationship
     user = relationship("Users", back_populates="contacts")

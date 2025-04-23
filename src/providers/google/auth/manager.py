@@ -1,6 +1,21 @@
 """
-Google authentication manager for Ultimate Assistant.
-Handles OAuth2 flow and authentication with Google services.
+Google authentication manager for Mantra Demo application.
+
+This module handles the OAuth2 flow and authentication with Google services,
+providing a unified interface for:
+- Generating authorization URLs
+- Exchanging authorization codes for tokens
+- Validating and refreshing tokens
+- Storing and retrieving credentials
+- Getting user information from Google
+
+The manager works with the database to persist credentials and integration status,
+allowing for long-term access to Google services on behalf of users.
+
+Security Note:
+    This module handles sensitive OAuth tokens. In a production environment,
+    additional security measures should be implemented, such as token encryption
+    and more robust error handling.
 """
 
 import os
@@ -23,7 +38,21 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 class GoogleAuthManager:
-    """Manages Google authentication flow"""
+    """
+    Manages Google authentication flow and credential lifecycle.
+
+    This class provides methods for initiating the OAuth flow, exchanging
+    authorization codes for tokens, validating and refreshing tokens, and
+    storing/retrieving credentials from the database.
+
+    The manager works with a database session to persist credentials and
+    maintain the state of Google integrations for users.
+
+    Attributes:
+        db (Session): SQLAlchemy database session
+        credentials_manager (GoogleCredentialsManager): Helper for credential operations
+        scopes (List[str]): OAuth scopes to request during authorization
+    """
 
     # Default OAuth scopes
     DEFAULT_SCOPES = [
@@ -38,7 +67,23 @@ class GoogleAuthManager:
         self.scopes = self.DEFAULT_SCOPES
 
     def get_authorization_url(self, redirect_uri: str, state: Optional[str] = None) -> str:
-        """Get the URL for Google OAuth authorization"""
+        """
+        Get the URL for Google OAuth authorization.
+
+        This method generates a URL that the user should be redirected to in order
+        to authorize the application to access their Google data. The URL includes
+        the requested scopes, redirect URI, and state parameter for security.
+
+        Args:
+            redirect_uri (str): The URI to redirect to after authorization
+            state (Optional[str]): A random string to prevent CSRF attacks
+
+        Returns:
+            str: The authorization URL to redirect the user to
+
+        Raises:
+            ValueError: If client ID or client secret is missing
+        """
         if not self.credentials_manager.client_id or not self.credentials_manager.client_secret:
             raise ValueError("Missing client ID or client secret")
 
@@ -70,11 +115,39 @@ class GoogleAuthManager:
         return auth_url
 
     def exchange_code(self, code: str, redirect_uri: str) -> Optional[Dict[str, Any]]:
-        """Exchange an authorization code for credentials"""
+        """
+        Exchange an authorization code for credentials.
+
+        After the user authorizes the application, Google redirects to the
+        redirect_uri with an authorization code. This method exchanges that
+        code for access and refresh tokens that can be used to make API calls.
+
+        Args:
+            code (str): The authorization code from Google
+            redirect_uri (str): The redirect URI used in the authorization request
+
+        Returns:
+            Optional[Dict[str, Any]]: A dictionary containing the credentials,
+                including access_token, refresh_token, token_uri, etc.,
+                or None if the exchange fails
+        """
         return self.credentials_manager.exchange_code(code, redirect_uri)
 
     def build_credentials(self, credentials_dict: Dict[str, Any]) -> Optional[Credentials]:
-        """Build Google Credentials object from dictionary"""
+        """
+        Build Google Credentials object from a dictionary.
+
+        This method converts a dictionary representation of credentials
+        (typically stored in the database) into a Google Credentials object
+        that can be used with Google API client libraries.
+
+        Args:
+            credentials_dict (Dict[str, Any]): Dictionary containing credential information
+                Must include at least 'access_token'
+
+        Returns:
+            Optional[Credentials]: A Google Credentials object, or None if invalid
+        """
         if not credentials_dict or "access_token" not in credentials_dict:
             return None
 
@@ -93,7 +166,21 @@ class GoogleAuthManager:
             return None
 
     def validate_and_refresh(self, credentials_dict: Dict[str, Any]) -> bool:
-        """Validate credentials and refresh if needed"""
+        """
+        Validate credentials and refresh them if needed.
+
+        This method checks if the provided credentials are valid and not expired.
+        If they are expired but have a refresh token, it attempts to refresh them.
+        The credentials_dict is updated in-place if refreshed successfully.
+
+        Args:
+            credentials_dict (Dict[str, Any]): Dictionary containing credential information
+                Must include 'access_token' and should include 'refresh_token' for refresh
+
+        Returns:
+            bool: True if credentials are valid or were refreshed successfully,
+                False otherwise
+        """
         if not credentials_dict or "access_token" not in credentials_dict:
             logger.error("Invalid credentials dictionary")
             return False
@@ -135,15 +222,52 @@ class GoogleAuthManager:
             return False
 
     def get_user_info(self, credentials_dict: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Get user information from Google"""
+        """
+        Get user information from Google.
+
+        This method uses the provided credentials to fetch the user's profile
+        information from Google's userinfo endpoint.
+
+        Args:
+            credentials_dict (Dict[str, Any]): Dictionary containing credential information
+                Must include 'access_token'
+
+        Returns:
+            Optional[Dict[str, Any]]: User information including email, name, etc.,
+                or None if the request fails
+        """
         return self.credentials_manager.get_user_info(credentials_dict)
 
     def set_scopes(self, scopes: List[str]) -> None:
-        """Set the OAuth scopes to request"""
+        """
+        Set the OAuth scopes to request during authorization.
+
+        This method allows customizing which Google API permissions will be
+        requested when generating an authorization URL.
+
+        Args:
+            scopes (List[str]): List of OAuth scope strings
+                Example: ['https://www.googleapis.com/auth/gmail.readonly']
+        """
         self.scopes = scopes
 
     async def get_credentials(self, user_id: uuid.UUID) -> Optional[Dict]:
-        """Get stored Google OAuth credentials for a user."""
+        """
+        Get stored Google OAuth credentials for a user.
+
+        This method retrieves the stored credentials for a user from the database,
+        formatted as a dictionary that can be used to create a Credentials object.
+
+        Args:
+            user_id (uuid.UUID): The ID of the user to get credentials for
+
+        Returns:
+            Optional[Dict]: A dictionary containing the credentials,
+                or None if no active integration exists
+
+        Raises:
+            SQLAlchemyError: If there's a database error
+        """
         try:
             integration = self.db.query(GoogleIntegration).filter(
                 GoogleIntegration.user_id == user_id,
@@ -165,7 +289,24 @@ class GoogleAuthManager:
             return None
 
     async def save_credentials(self, user_id: uuid.UUID, credentials: Dict) -> bool:
-        """Save or update Google OAuth credentials for a user."""
+        """
+        Save or update Google OAuth credentials for a user.
+
+        This method stores the provided credentials in the database, either by
+        updating an existing integration or creating a new one.
+
+        Args:
+            user_id (uuid.UUID): The ID of the user to save credentials for
+            credentials (Dict): The credentials to save
+                Should include 'token' (access token), 'refresh_token',
+                'scopes', and optionally 'expiry'
+
+        Returns:
+            bool: True if saved successfully, False otherwise
+
+        Raises:
+            SQLAlchemyError: If there's a database error (will be caught and logged)
+        """
         try:
             integration = self.db.query(GoogleIntegration).filter(
                 GoogleIntegration.user_id == user_id,
@@ -202,7 +343,21 @@ class GoogleAuthManager:
             return False
 
     async def clear_credentials(self, user_id: uuid.UUID) -> bool:
-        """Clear Google OAuth credentials for a user."""
+        """
+        Clear Google OAuth credentials for a user.
+
+        This method marks a user's Google integration as disconnected and
+        clears the stored tokens for security.
+
+        Args:
+            user_id (uuid.UUID): The ID of the user to clear credentials for
+
+        Returns:
+            bool: True if cleared successfully, False if no active integration exists
+
+        Raises:
+            SQLAlchemyError: If there's a database error (will be caught and logged)
+        """
         try:
             integration = self.db.query(GoogleIntegration).filter(
                 GoogleIntegration.user_id == user_id,
