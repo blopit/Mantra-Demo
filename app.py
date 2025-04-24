@@ -6,86 +6,76 @@ This module initializes and configures the FastAPI application, including:
 - Logging configuration
 - Middleware setup (CORS, Sessions)
 - Template and static file configuration
-- Route registration
 - Basic endpoints for the application
 
-The application demonstrates Google OAuth integration with credential storage
-in both database and environment variables.
+The application uses localStorage for user management.
 """
 
 import os
 import logging
-from fastapi import FastAPI, Request, Depends, HTTPException
+from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 from dotenv import load_dotenv
-from sqlalchemy.orm import Session
 
-# Load environment variables from .env file
-load_dotenv()  # This loads variables from .env into os.environ
+# Load environment variables
+load_dotenv()
 
-# Configure logging with basic configuration
+# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
-# Create FastAPI app with metadata for OpenAPI documentation
+# Create FastAPI app
 app = FastAPI(
     title="Mantra Demo",
-    description="Google Sign-In Demo with credential storage in database and environment variables",
-    version="0.1.0",
-    docs_url="/api/docs",
-    redoc_url="/api/redoc"
+    description="Google Sign-In Demo with localStorage user management",
+    version="0.1.0"
 )
 
 # Configure middleware
 app.add_middleware(
-    SessionMiddleware,
-    secret_key=os.getenv("SESSION_SECRET_KEY", "dev-secret-key"),
-    max_age=3600,
-    same_site="lax",  # Allow session cookies in redirects
-    https_only=False  # Allow HTTP in development
-)
-
-app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.getenv("ALLOWED_ORIGINS", "http://localhost:8000").split(","),
+    allow_origins=["*"],  # For development - restrict in production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"]
+)
+
+# Add session middleware
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=os.getenv("SESSION_SECRET_KEY", "your-secret-key-here"),  # Change this to a secure secret key
+    max_age=3600  # Session expiry time in seconds (1 hour)
 )
 
 # Configure templates and static files
 templates = Jinja2Templates(directory="src/templates")
 app.mount("/static", StaticFiles(directory="src/static"), name="static")
 
-# Import routes
-from src.custom_routes.google.auth import router as google_auth_router
-
-# Register routes
-app.include_router(google_auth_router)
+# Import and include routes
+from src.routes.google import router as google_router
+app.include_router(google_router)
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
-    """
-    Render the Google sign-in page.
-
-    This is the main entry point for users to start the Google OAuth flow.
-
-    Args:
-        request (Request): The FastAPI request object
-
-    Returns:
-        TemplateResponse: Rendered HTML template for Google sign-in
-    """
+    """Redirect to accounts if logged in, otherwise show sign-in page"""
+    # Check if user is authenticated
+    user = request.session.get("user")
+    if user:
+        return RedirectResponse(url="/accounts", status_code=302)
+        
     return templates.TemplateResponse(
         "google_signin.html",
-        {"request": request}
+        {
+            "request": request,
+            "google_client_id": os.getenv("GOOGLE_CLIENT_ID", "")
+        }
     )
 
 @app.get("/signin", response_class=HTMLResponse)
@@ -94,34 +84,43 @@ async def signin(
     status: str = None,
     success: bool = False
 ):
-    """
-    Render the Google sign-in page with status message.
-
-    This endpoint is used for redirects after authentication attempts,
-    allowing for status messages to be displayed to the user.
-
-    Args:
-        request (Request): The FastAPI request object
-        status (str, optional): Status message to display. Defaults to None.
-        success (bool, optional): Whether the operation was successful. Defaults to False.
-
-    Returns:
-        TemplateResponse: Rendered HTML template with status information
-    """
+    """Redirect to accounts if logged in, otherwise show sign-in page with status"""
+    # Check if user is authenticated
+    user = request.session.get("user")
+    if user and not status:  # Only redirect if there's no status message to show
+        return RedirectResponse(url="/accounts", status_code=302)
+        
     return templates.TemplateResponse(
         "google_signin.html",
         {
             "request": request,
+            "google_client_id": os.getenv("GOOGLE_CLIENT_ID", ""),
             "status": status,
             "success": success
+        }
+    )
+
+@app.get("/accounts", response_class=HTMLResponse)
+async def accounts(request: Request):
+    """Render the accounts page for authenticated users only"""
+    # Check if user is authenticated
+    user = request.session.get("user")
+    if not user:
+        return RedirectResponse(url="/signin?status=Please sign in to access your account", status_code=302)
+        
+    return templates.TemplateResponse(
+        "accounts.html",
+        {
+            "request": request,
+            "google_client_id": os.getenv("GOOGLE_CLIENT_ID", "")
         }
     )
 
 if __name__ == "__main__":
     import uvicorn
 
-    # Use port 8000 by default, can be overridden by environment variables
-    port = int(os.getenv("PORT", 8000))
+    # Always use port 8000
+    port = 8000
     host = os.getenv("HOST", "0.0.0.0")
     reload_enabled = os.getenv("RELOAD", "True").lower() == "true"
 
