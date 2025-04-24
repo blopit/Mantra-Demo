@@ -5,44 +5,42 @@ from sqlalchemy.sql import func
 
 from src.models.base import Base
 from src.models.custom_types import UUIDType
+from src.models.google_auth import GoogleAuth
+from src.models.google_integration import GoogleIntegration
 
 class Users(Base):
     """
-    Model for storing user data in the application.
-
-    This model represents users in the system and stores their basic information.
-    It serves as the central entity that other models relate to, such as
-    GoogleIntegration and Contacts.
-
+    Model for user accounts in the system.
+    
+    This model stores core user information and maintains relationships
+    with various integration models.
+    
     Attributes:
-        id (UUID): Primary key, automatically generated UUID
-        email (str): User's email address, must be unique
+        id (str): Primary key - stores large Google user IDs as strings
+        email (str): User's email address
         name (str): User's full name
-        profile_picture (str): User's profile picture URL
-        is_active (bool): Whether the user account is active
-        created_at (datetime): When the user was created
-        updated_at (datetime): When the user was last updated
-
-    Relationships:
-        google_integration: One-to-one relationship with GoogleIntegration
-        contacts: One-to-many relationship with Contacts
+        is_active (bool): Whether user account is active
+        created_at (datetime): Record creation timestamp
+        updated_at (datetime): Record last update timestamp
+        profile_picture (str): URL to user's profile picture
     """
     __tablename__ = "users"
-
-    id = Column(Integer, primary_key=True, index=True)
-    email = Column(String, unique=True, index=True)
+    
+    id = Column(String, primary_key=True)  # Changed to String to handle large Google user IDs
+    email = Column(String, unique=True, nullable=False)
     name = Column(String)
-    profile_picture = Column(String)
-    is_active = Column(Boolean, default=True)
+    is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-    hashed_password = Column(String)
-
+    profile_picture = Column(String)
+    
     # Relationships
-    google_integration = relationship("GoogleIntegration", back_populates="user", uselist=False)
-    contacts = relationship("Contacts", back_populates="user")
-    google_auth = relationship("GoogleAuth", back_populates="user")
-
+    contacts = relationship("Contacts", back_populates="user", cascade="all, delete-orphan")
+    google_auth = relationship("GoogleAuth", back_populates="user", uselist=False)
+    google_integrations = relationship("GoogleIntegration", back_populates="user")
+    mantra_installations = relationship("MantraInstallation", back_populates="user")
+    mantras = relationship("Mantra", back_populates="user")
+    
     def __repr__(self):
         return f"<User {self.email}>"
 

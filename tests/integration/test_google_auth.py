@@ -63,6 +63,11 @@ def mock_service():
     }
     return mock
 
+@pytest.fixture
+def test_user_id():
+    """Fixture to provide a test user ID."""
+    return "123456789012345678901"  # 21-digit Google user ID
+
 def test_auth_url_error(client, mock_flow):
     """Test error handling in auth URL generation."""
     mock_flow.authorization_url.side_effect = Exception("Test error")
@@ -92,10 +97,11 @@ def test_callback_success(client, mock_flow, mock_service, db_session):
         assert user.name == "Test User"
         assert user.profile_picture == "https://test.picture"
 
-def test_store_in_db_url(client, db_session):
+def test_store_in_db_url(client, db_session, test_user_id):
     """Test storing auth data in database."""
     # Create test user first
     user = Users(
+        id=test_user_id,
         email="test@example.com",
         name="Test User",
         profile_picture="https://test.picture"
@@ -117,10 +123,11 @@ def test_store_in_db_url(client, db_session):
     assert response.status_code == 303
     assert response.headers["location"] == "/"
 
-def test_status_connected(client, db_session):
+def test_status_connected(client, db_session, test_user_id):
     """Test connection status when user is connected."""
     # Create test user
     user = Users(
+        id=test_user_id,
         email="test@example.com",
         name="Test User",
         profile_picture="https://test.picture"
@@ -151,10 +158,11 @@ def test_status_not_connected(client):
     assert data["connected"] is False
     assert data["user"] is None
 
-def test_disconnect(client, db_session):
+def test_disconnect(client, db_session, test_user_id):
     """Test disconnecting Google account."""
     # Create test user
     user = Users(
+        id=test_user_id,
         email="test@example.com",
         name="Test User",
         profile_picture="https://test.picture"

@@ -165,6 +165,115 @@
             margin: 5px 0 0;
             color: #666;
         }
+        
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            z-index: 1000;
+        }
+        
+        .modal-content {
+            position: relative;
+            background: white;
+            margin: 50px auto;
+            padding: 20px;
+            width: 90%;
+            max-width: 600px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        .close {
+            position: absolute;
+            right: 20px;
+            top: 20px;
+            font-size: 24px;
+            cursor: pointer;
+            color: #666;
+        }
+        
+        .workflow-editor {
+            margin-top: 20px;
+        }
+        
+        .workflow-editor textarea {
+            width: 100%;
+            min-height: 300px;
+            margin: 10px 0;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-family: monospace;
+        }
+        
+        .workflow-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        
+        .workflow-status {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        
+        .status-active {
+            background: #e3fcef;
+            color: #0a6c3b;
+        }
+        
+        .status-paused {
+            background: #fff3cd;
+            color: #856404;
+        }
+        
+        .status-error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .add-workflow {
+            margin-bottom: 20px;
+        }
+        
+        .tab-container {
+            margin-bottom: 20px;
+        }
+        
+        .tab-buttons {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        
+        .tab-button {
+            padding: 8px 16px;
+            border: none;
+            background: #f8f9fa;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        
+        .tab-button.active {
+            background: #007bff;
+            color: white;
+        }
+        
+        .tab-content {
+            display: none;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
     </style>
 </head>
 <body>
@@ -192,7 +301,10 @@
                             <p id="googleStatus">Checking connection...</p>
                         </div>
                     </div>
-                    <button id="googleButton" class="btn btn-danger" onclick="disconnectService('google')" style="display: none;">Disconnect</button>
+                    <div class="service-actions">
+                        <button id="googleButton" class="btn btn-danger" onclick="disconnectService('google')" style="display: none;">Disconnect</button>
+                        <button id="googleSignInButton" class="btn btn-primary" onclick="initiateGoogleSignIn()" style="display: none;">Sign In</button>
+                    </div>
                 </div>
                 
                 <div class="service-card" style="opacity: 0.5;">
@@ -218,97 +330,423 @@
         </div>
         
         <div class="section">
-            <h2>Available Mantras</h2>
-            <div class="workflows-grid">
-                <div class="workflow-card">
-                    <h3>Email Summarizer</h3>
-                    <p>Automatically summarize your emails and extract key information.</p>
-                    <p style="margin-top: 10px;">
-                        <button class="btn btn-primary">Install Mantra</button>
-                    </p>
+            <h2>Workflow Management</h2>
+            
+            <div class="tab-container">
+                <div class="tab-buttons">
+                    <button class="tab-button active" onclick="switchTab('installed')">My Installed Mantras</button>
+                    <button class="tab-button" onclick="switchTab('available')">Available Mantras</button>
+                    <button class="tab-button" onclick="switchTab('create')">Create New Mantra</button>
                 </div>
                 
-                <div class="workflow-card">
-                    <h3>Meeting Scheduler</h3>
-                    <p>Automate meeting scheduling by analyzing email context.</p>
-                    <p style="margin-top: 10px;">
-                        <button class="btn btn-primary">Install Mantra</button>
-                    </p>
+                <!-- Installed Mantras Tab -->
+                <div id="installed-tab" class="tab-content active">
+                    <div id="installed-mantras" class="workflows-grid">
+                        <!-- Installed mantras will be loaded here -->
+                    </div>
                 </div>
                 
-                <div class="workflow-card">
-                    <h3>Task Extractor</h3>
-                    <p>Extract tasks from emails and create todo items automatically.</p>
-                    <p style="margin-top: 10px;">
-                        <button class="btn btn-primary">Install Mantra</button>
-                    </p>
+                <!-- Available Mantras Tab -->
+                <div id="available-tab" class="tab-content">
+                    <div id="available-mantras" class="workflows-grid">
+                        <!-- Available mantras will be loaded here -->
+                    </div>
+                </div>
+                
+                <!-- Create New Mantra Tab -->
+                <div id="create-tab" class="tab-content">
+                    <div class="workflow-editor">
+                        <input type="text" id="workflow-name" placeholder="Workflow Name" class="form-control" style="width: 100%; margin-bottom: 10px; padding: 8px;">
+                        <textarea id="workflow-description" placeholder="Workflow Description" style="min-height: 100px;"></textarea>
+                        <div style="margin: 10px 0;">
+                            <button class="btn btn-secondary" onclick="loadSampleWorkflow()">Load Sample Workflow</button>
+                        </div>
+                        <textarea id="workflow-json" placeholder="Paste your n8n workflow JSON here"></textarea>
+                        <div class="workflow-actions">
+                            <button class="btn btn-primary" onclick="createWorkflow()">Create Workflow</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Workflow Modal -->
+    <div id="editModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeModal()">&times;</span>
+            <h2>Edit Workflow</h2>
+            <div class="workflow-editor">
+                <input type="text" id="edit-workflow-name" placeholder="Workflow Name" class="form-control" style="width: 100%; margin-bottom: 10px; padding: 8px;">
+                <textarea id="edit-workflow-description" placeholder="Workflow Description" style="min-height: 100px;"></textarea>
+                <textarea id="edit-workflow-json" placeholder="Workflow JSON"></textarea>
+                <div class="workflow-actions">
+                    <button class="btn btn-primary" onclick="saveWorkflow()">Save Changes</button>
+                    <button class="btn btn-danger" onclick="closeModal()">Cancel</button>
                 </div>
             </div>
         </div>
     </div>
 
     <script>
-        // Load user info on page load
-        window.onload = async function() {
-            // Check Google connection status
+        // Get user info from localStorage
+        const userProfile = JSON.parse(localStorage.getItem('userProfile') || '{}');
+        
+        // Check both localStorage and session data
+        async function checkAuthentication() {
             try {
                 const response = await fetch('/api/google/status');
                 const data = await response.json();
                 
-                const googleStatus = document.getElementById('googleStatus');
-                const googleButton = document.getElementById('googleButton');
+                if (!data.connected) {
+                    window.location.href = '/signin?status=Please sign in to access your account';
+                    return;
+                }
                 
-                if (data.status === 'success') {
-                    googleStatus.textContent = `Connected (${data.email})`;
-                    googleButton.style.display = 'block';
-                    googleButton.className = 'btn btn-danger';
-                    googleButton.textContent = 'Disconnect';
-                    
-                    // Also update user profile if available
-                    const user = {
-                        email: data.email,
-                        picture: data.picture || 'https://www.gravatar.com/avatar/?d=mp',
-                        name: data.name || data.email.split('@')[0]
-                    };
-                    
-                    document.getElementById('userPicture').src = user.picture;
-                    document.getElementById('userName').textContent = user.name;
-                    document.getElementById('userEmail').textContent = user.email;
-                } else {
-                    googleStatus.textContent = 'Not connected';
-                    googleButton.style.display = 'block';
-                    googleButton.className = 'btn btn-primary';
-                    googleButton.textContent = 'Connect';
-                    googleButton.onclick = () => window.location.href = '/signin';
+                // If we have session data but no localStorage data, try to sync
+                if (data.connected && (!userProfile || !userProfile.id)) {
+                    const user = data.user;
+                    if (user) {
+                        localStorage.setItem('userProfile', JSON.stringify(user));
+                        displayUserInfo(user);
+                    }
                 }
             } catch (error) {
-                console.error('Error checking Google status:', error);
-                document.getElementById('googleStatus').textContent = 'Error checking status';
+                console.error('Error checking authentication:', error);
+                window.location.href = '/signin?status=Authentication error occurred';
             }
-        };
+        }
 
-        async function disconnectService(service) {
-            if (!confirm(`Are you sure you want to disconnect ${service}?`)) {
-                return;
-            }
+        // Call authentication check on page load
+        checkAuthentication();
 
+        // Only proceed with display if we have user data
+        if (userProfile && userProfile.id) {
+            document.getElementById('userName').textContent = userProfile.name || 'User';
+            document.getElementById('userEmail').textContent = userProfile.email || '';
+            document.getElementById('userPicture').src = userProfile.picture || '';
+        }
+
+        // Tab switching
+        function switchTab(tabName) {
+            // Hide all tabs
+            document.querySelectorAll('.tab-content').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            document.querySelectorAll('.tab-button').forEach(button => {
+                button.classList.remove('active');
+            });
+            
+            // Show selected tab
+            document.getElementById(`${tabName}-tab`).classList.add('active');
+            document.querySelector(`[onclick="switchTab('${tabName}')"]`).classList.add('active');
+        }
+
+        // Load installed mantras
+        async function loadInstalledMantras() {
             try {
-                const response = await fetch(`/api/google/disconnect`, {
+                if (!userProfile.id) {
+                    console.warn('No user ID available');
+                    return;
+                }
+                const response = await fetch('/api/mantras/users/' + userProfile.id);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const mantras = await response.json();
+                
+                const container = document.getElementById('installed-mantras');
+                container.innerHTML = mantras.map(mantra => `
+                    <div class="workflow-card">
+                        <h3>${mantra.mantra.name}</h3>
+                        <p>${mantra.mantra.description}</p>
+                        <p style="margin: 10px 0;">
+                            <span class="workflow-status status-${mantra.status.toLowerCase()}">${mantra.status}</span>
+                        </p>
+                        <p style="margin-top: 10px;">
+                            <button class="btn btn-primary" onclick="executeWorkflow('${mantra.installation_id}')">Execute</button>
+                            <button class="btn btn-danger" onclick="uninstallWorkflow('${mantra.installation_id}')">Uninstall</button>
+                        </p>
+                    </div>
+                `).join('');
+            } catch (error) {
+                console.error('Error loading installed mantras:', error);
+            }
+        }
+
+        // Load available mantras
+        async function loadAvailableMantras() {
+            try {
+                const response = await fetch('/api/mantras');
+                const mantras = await response.json();
+                
+                const container = document.getElementById('available-mantras');
+                container.innerHTML = mantras.map(mantra => `
+                    <div class="workflow-card">
+                        <h3>${mantra.name}</h3>
+                        <p>${mantra.description}</p>
+                        <p style="margin-top: 10px;">
+                            <button class="btn btn-primary" onclick="installWorkflow('${mantra.id}')">Install Mantra</button>
+                        </p>
+                    </div>
+                `).join('');
+            } catch (error) {
+                console.error('Error loading available mantras:', error);
+            }
+        }
+
+        // Create new workflow
+        async function createWorkflow() {
+            const name = document.getElementById('workflow-name').value;
+            const description = document.getElementById('workflow-description').value;
+            const workflowJsonStr = document.getElementById('workflow-json').value;
+            
+            try {
+                // Validate required fields
+                if (!name || !description || !workflowJsonStr) {
+                    throw new Error('Please fill in all fields');
+                }
+
+                // Get user info from session
+                const response = await fetch('/api/google/status');
+                const userStatus = await response.json();
+                
+                if (!userStatus.connected || !userStatus.user) {
+                    throw new Error('Please log in to create a workflow');
+                }
+
+                // Parse and validate workflow JSON
+                let workflowJson;
+                try {
+                    workflowJson = JSON.parse(workflowJsonStr);
+                    if (!workflowJson.nodes || !Array.isArray(workflowJson.nodes)) {
+                        throw new Error('Invalid workflow format: missing or invalid nodes array');
+                    }
+                } catch (jsonError) {
+                    console.error('JSON parse error:', jsonError);
+                    throw new Error('Invalid workflow JSON format. Please check your input.');
+                }
+
+                console.log('Creating workflow with:', { name, description, workflowJson });
+                
+                // Create URL with query parameters for required fields
+                const url = new URL('/api/mantras/', window.location.origin);
+                url.searchParams.append('name', name);
+                url.searchParams.append('description', description);
+                url.searchParams.append('user_id', userStatus.user.id);
+                
+                const createResponse = await fetch(url, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
-                    }
+                    },
+                    body: JSON.stringify(workflowJson)
                 });
+                
+                if (!createResponse.ok) {
+                    const errorData = await createResponse.json();
+                    console.error('Server error response:', errorData);
+                    if (errorData.detail && Array.isArray(errorData.detail)) {
+                        throw new Error(errorData.detail.map(err => err.msg).join(', '));
+                    }
+                    throw new Error(errorData.detail || 'Failed to create workflow');
+                }
+                
+                alert('Workflow created successfully!');
+                loadAvailableMantras();
+                switchTab('available');
+                
+            } catch (error) {
+                console.error('Error creating workflow:', error);
+                alert('Error creating workflow: ' + error.message);
+            }
+        }
 
+        // Install workflow
+        async function installWorkflow(mantraId) {
+            try {
+                const response = await fetch(`/api/mantras/${mantraId}/install`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        user_id: userProfile.id
+                    })
+                });
+                
                 if (response.ok) {
-                    window.location.href = '/signin';
+                    alert('Mantra installed successfully!');
+                    loadInstalledMantras();
+                    switchTab('installed');
                 } else {
-                    const data = await response.json();
-                    alert(`Error disconnecting service: ${data.error}`);
+                    throw new Error('Failed to install mantra');
                 }
             } catch (error) {
-                console.error('Error:', error);
-                alert('Error disconnecting service. Please try again.');
+                console.error('Error installing mantra:', error);
+                alert('Error installing mantra: ' + error.message);
+            }
+        }
+
+        // Uninstall workflow
+        async function uninstallWorkflow(installationId) {
+            if (!confirm('Are you sure you want to uninstall this mantra?')) return;
+            
+            try {
+                const response = await fetch(`/api/mantras/installations/${installationId}`, {
+                    method: 'DELETE'
+                });
+                
+                if (response.ok) {
+                    alert('Mantra uninstalled successfully!');
+                    loadInstalledMantras();
+                } else {
+                    throw new Error('Failed to uninstall mantra');
+                }
+            } catch (error) {
+                console.error('Error uninstalling mantra:', error);
+                alert('Error uninstalling mantra: ' + error.message);
+            }
+        }
+
+        // Execute workflow
+        async function executeWorkflow(installationId) {
+            try {
+                const response = await fetch(`/api/mantras/installations/${installationId}/execute`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        data: {}  // Add any required input data here
+                    })
+                });
+                
+                const result = await response.json();
+                alert('Workflow executed successfully!');
+                console.log('Execution result:', result);
+            } catch (error) {
+                console.error('Error executing workflow:', error);
+                alert('Error executing workflow: ' + error.message);
+            }
+        }
+
+        // Check Google connection status
+        async function checkGoogleStatus() {
+            try {
+                const response = await fetch('/api/google/status');
+                const data = await response.json();
+                
+                const statusElement = document.getElementById('googleStatus');
+                const disconnectButton = document.getElementById('googleButton');
+                const signInButton = document.getElementById('googleSignInButton');
+                
+                if (data.connected) {
+                    statusElement.textContent = 'Connected';
+                    statusElement.style.color = '#28a745';
+                    disconnectButton.style.display = 'block';
+                    signInButton.style.display = 'none';
+                } else {
+                    statusElement.textContent = 'Not connected';
+                    statusElement.style.color = '#dc3545';
+                    disconnectButton.style.display = 'none';
+                    signInButton.style.display = 'block';
+                }
+            } catch (error) {
+                console.error('Error checking Google status:', error);
+            }
+        }
+
+        // Disconnect service
+        async function disconnectService(service) {
+            if (!confirm(`Are you sure you want to disconnect ${service}?`)) return;
+            
+            try {
+                const response = await fetch(`/api/${service}/disconnect`, {
+                    method: 'POST'
+                });
+                
+                if (response.ok) {
+                    alert(`${service} disconnected successfully!`);
+                    checkGoogleStatus();
+                } else {
+                    throw new Error(`Failed to disconnect ${service}`);
+                }
+            } catch (error) {
+                console.error(`Error disconnecting ${service}:`, error);
+                alert(`Error disconnecting ${service}: ` + error.message);
+            }
+        }
+
+        // Load sample workflow
+        function loadSampleWorkflow() {
+            const sampleWorkflow = {
+                "nodes": [
+                    {
+                        "id": "1",
+                        "type": "gmail",
+                        "name": "Send Email",
+                        "parameters": {
+                            "operation": "sendEmail",
+                            "to": "${trigger.email}",
+                            "subject": "Welcome to Mantra!",
+                            "text": "Thanks for trying out our workflow automation!"
+                        }
+                    },
+                    {
+                        "id": "2", 
+                        "type": "googleCalendar",
+                        "name": "Create Event",
+                        "parameters": {
+                            "operation": "createEvent",
+                            "calendar": "primary",
+                            "summary": "Onboarding Call",
+                            "description": "Welcome call with new user",
+                            "start": "${trigger.preferredTime}",
+                            "end": "${addHours(trigger.preferredTime, 1)}"
+                        }
+                    }
+                ],
+                "connections": {
+                    "Send Email": {
+                        "main": [["Create Event", 0]]
+                    }
+                },
+                "trigger": {
+                    "type": "webhook",
+                    "parameters": {
+                        "email": {"type": "string"},
+                        "preferredTime": {"type": "string", "format": "date-time"}
+                    }
+                }
+            };
+            
+            document.getElementById('workflow-name').value = 'Welcome Email and Calendar Event';
+            document.getElementById('workflow-description').value = 'Sends a welcome email and creates a calendar event for onboarding';
+            document.getElementById('workflow-json').value = JSON.stringify(sampleWorkflow, null, 2);
+        }
+
+        // Initial load
+        window.onload = function() {
+            checkGoogleStatus();
+            loadInstalledMantras();
+            loadAvailableMantras();
+        };
+
+        async function initiateGoogleSignIn() {
+            try {
+                const response = await fetch('/api/google/auth');
+                const data = await response.json();
+                
+                if (data.auth_url) {
+                    window.location.href = data.auth_url;
+                } else {
+                    console.error('No auth_url in response:', data);
+                    alert('Error starting authentication. Please try again.');
+                }
+            } catch (error) {
+                console.error('Error initiating Google sign-in:', error);
+                alert('Error starting authentication. Please try again.');
             }
         }
     </script>
