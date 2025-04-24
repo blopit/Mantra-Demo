@@ -18,6 +18,10 @@ from fastapi import FastAPI
 from starlette.middleware.sessions import SessionMiddleware
 from fastapi.middleware.cors import CORSMiddleware
 from src.models.base import Base
+from src.models.users import Users
+from src.models.mantra import Mantra, MantraInstallation
+from src.main import app as main_app
+from src.routes.mantra import get_test_session
 
 # Add the project root directory to the Python path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -29,6 +33,7 @@ from src.utils.google_credentials import (
     clear_credentials_from_database_url
 )
 from src.custom_routes.google.auth import router as google_auth_router
+from src.routes.mantra import router as mantra_router
 from src.utils.database import get_db, SQLiteUUID
 
 class SQLiteUUID(TypeDecorator):
@@ -70,7 +75,11 @@ def engine():
         connect_args={"check_same_thread": False},
         poolclass=StaticPool
     )
+    
+    # Create all tables
+    Base.metadata.drop_all(bind=engine)  # Drop all tables first
     Base.metadata.create_all(bind=engine)
+    
     return engine
 
 @pytest.fixture(scope="session")
@@ -97,39 +106,29 @@ def override_get_db(db_session):
     return _get_test_db
 
 @pytest.fixture(scope="function")
-def app():
+def app(db_session, test_user):
     """Create test FastAPI app."""
-    app = FastAPI()
+    # Use the main app instance
+    app = main_app
     
-    # Add CORS middleware
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    # Override the database dependency
+    app.dependency_overrides[get_db] = override_get_db(db_session)
     
-    # Add session middleware
-    app.add_middleware(SessionMiddleware, secret_key="test_secret")
-    
-    # Add root route
-    @app.get("/")
-    async def root():
-        return {"message": "Hello World"}
-    
-    # Include Google auth router
-    app.include_router(google_auth_router)
+    # Override the test session dependency
+    def override_test_session():
+        return {"user": {
+            "id": test_user.id,
+            "email": test_user.email,
+            "name": test_user.name
+        }}
+    app.dependency_overrides[get_test_session] = override_test_session
     
     return app
 
 @pytest.fixture(scope="function")
-def client(app, db_session):
-    """Get test client with overridden database dependency."""
-    app.dependency_overrides[get_db] = override_get_db(db_session)
-    client = TestClient(app, follow_redirects=False)
-    yield client
-    app.dependency_overrides.clear()
+def client(app):
+    """Get test client."""
+    return TestClient(app)
 
 @pytest.fixture
 def mock_env_empty():
@@ -211,5 +210,19 @@ def mock_user_info():
         "email": "test@example.com",
         "name": "Test User",
         "picture": "https://example.com/picture.jpg",
-        "sub": "123456789"
+        "sub": "123456789012345678901"  # 21-digit Google user ID
     }
+
+@pytest.fixture
+def test_user(db_session):
+    """Create a test user."""
+    user_id = str(uuid.uuid4())
+    user = Users(
+        id=user_id,
+        email=f"test_{user_id}@example.com",  # Use a unique email
+        name="Test User"
+    )
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+    return user

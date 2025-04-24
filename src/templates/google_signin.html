@@ -315,16 +315,15 @@
                 googleBtn.addEventListener('click', async function(e) {
                     e.preventDefault();
 
-                    // Use port 8000 consistently
-                    const baseUrl = window.location.protocol + '//' + window.location.hostname + ':8000';
-                    let authUrl = baseUrl + '/api/google/auth';
-
                     try {
                         // Fetch the auth URL from the backend
-                        const response = await fetch(authUrl);
+                        const response = await fetch('/api/google/auth');
                         const data = await response.json();
 
                         if (data.auth_url) {
+                            // Store current page URL for redirect back after auth
+                            localStorage.setItem('auth_redirect_from', window.location.pathname);
+                            
                             // Redirect to Google's consent screen
                             window.location.href = data.auth_url;
                         } else {
@@ -338,36 +337,59 @@
                 });
             }
 
-            // Check if we're on the callback page
+            // Check if we're on the callback page with an error
             const urlParams = new URLSearchParams(window.location.search);
-            const code = urlParams.get('code');
-            if (code) {
-                handleAuthCallback(code);
+            const error = urlParams.get('error');
+            if (error) {
+                console.error('Auth error:', error);
+                const errorDiv = document.createElement('div');
+                errorDiv.className = 'status error';
+                errorDiv.textContent = decodeURIComponent(error);
+                document.querySelector('.container').appendChild(errorDiv);
             }
         });
 
         async function handleAuthCallback(code) {
             try {
-                const baseUrl = window.location.protocol + '//' + window.location.hostname + ':8000';
-                const response = await fetch(`${baseUrl}/api/google/callback?code=${code}`);
-                const data = await response.json();
+                // Make the request without expecting JSON
+                const response = await fetch(`/api/google/callback?code=${code}`, {
+                    headers: {
+                        'Accept': 'text/html'
+                    },
+                    redirect: 'follow'
+                });
 
-                if (data.success) {
-                    // Store user info in localStorage
-                    window.Auth.setCurrentUser(data.user);
-                    
-                    // Store tokens securely
-                    window.Auth.setTokens(data.tokens);
-                    
-                    // Display user info
-                    displayUserInfo(data.user);
-                } else {
-                    console.error('Auth callback failed:', data.error);
-                    alert('Authentication failed. Please try again.');
+                // If we got redirected, follow the redirect
+                if (response.redirected) {
+                    window.location.href = response.url;
+                    return;
+                }
+
+                // If we got JSON, handle it
+                if (response.headers.get('content-type')?.includes('application/json')) {
+                    const data = await response.json();
+                    if (data.success && data.user) {
+                        // Store user info in localStorage
+                        localStorage.setItem('userProfile', JSON.stringify(data.user));
+                        
+                        // Store tokens securely
+                        if (data.tokens) {
+                            localStorage.setItem('tokens', JSON.stringify(data.tokens));
+                        }
+                        
+                        // Get the stored redirect URL or default to accounts
+                        const redirectTo = localStorage.getItem('auth_redirect_from') || '/accounts';
+                        localStorage.removeItem('auth_redirect_from'); // Clean up
+                        
+                        // Redirect back to the original page
+                        window.location.href = redirectTo;
+                    } else {
+                        throw new Error('Authentication failed');
+                    }
                 }
             } catch (error) {
                 console.error('Error handling callback:', error);
-                alert('Error completing authentication. Please try again.');
+                window.location.href = '/signin?error=' + encodeURIComponent('Error completing authentication. Please try again.');
             }
         }
 

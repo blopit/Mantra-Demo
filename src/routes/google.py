@@ -12,36 +12,54 @@ from google.auth.transport import requests as google_requests
 from typing import Optional
 import uuid
 import requests
+import google_auth_oauthlib
+from fastapi import HTTPException
 
 # Pydantic models for responses
 class AuthUrlResponse(BaseModel):
     auth_url: str
 
 class GoogleStatusResponse(BaseModel):
-    status: str
+    connected: bool
     email: Optional[str] = None
+    user: Optional[dict] = None
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/google", tags=["Google Integration"])
 
-@router.get("/auth", response_model=AuthUrlResponse)
+# Get the redirect URI from environment or use default
+REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:8000/signin")
+
+@router.get("/auth")
 async def google_auth():
-    """Generate Google OAuth URL"""
-    client_id = os.getenv("GOOGLE_CLIENT_ID")
-    redirect_uri = "http://localhost:8000/api/google/callback"
-    
-    # Google OAuth2 authorization URL with response_type=code for server-side flow
-    auth_url = (
-        "https://accounts.google.com/o/oauth2/v2/auth?"
-        f"client_id={client_id}&"
-        f"redirect_uri={redirect_uri}&"
-        "response_type=code&"
-        "scope=openid email profile&"
-        "access_type=offline&"
-        "prompt=consent"
-    )
-    
-    return {"auth_url": auth_url}
+    """Get Google OAuth URL"""
+    try:
+        # Create OAuth flow
+        flow = google_auth_oauthlib.flow.Flow.from_client_config(
+            {
+                "web": {
+                    "client_id": os.getenv("GOOGLE_CLIENT_ID"),
+                    "client_secret": os.getenv("GOOGLE_CLIENT_SECRET"),
+                    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                    "token_uri": "https://oauth2.googleapis.com/token",
+                    "redirect_uris": [REDIRECT_URI]
+                }
+            },
+            scopes=["openid", "https://www.googleapis.com/auth/userinfo.profile", "https://www.googleapis.com/auth/userinfo.email"]
+        )
+        
+        # Set the redirect URI explicitly
+        flow.redirect_uri = REDIRECT_URI
+        
+        auth_url = flow.authorization_url()[0]
+        return {"auth_url": auth_url}
+        
+    except Exception as e:
+        logger.error(f"Error generating auth URL: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error generating auth URL: {str(e)}"
+        )
 
 @router.get("/callback")
 async def google_callback(request: Request, code: Optional[str] = None):
@@ -56,12 +74,13 @@ async def google_callback(request: Request, code: Optional[str] = None):
             "code": code,
             "client_id": os.getenv("GOOGLE_CLIENT_ID"),
             "client_secret": os.getenv("GOOGLE_CLIENT_SECRET"),
-            "redirect_uri": "http://localhost:8000/api/google/callback",
+            "redirect_uri": REDIRECT_URI,
             "grant_type": "authorization_code"
         }
 
         token_response = requests.post(token_url, data=token_data)
         if not token_response.ok:
+            logger.error(f"Token exchange failed: {token_response.text}")
             return RedirectResponse(
                 url=f"/signin?error=Token exchange failed: {token_response.text}",
                 status_code=302
@@ -74,20 +93,35 @@ async def google_callback(request: Request, code: Optional[str] = None):
         client_id = os.getenv("GOOGLE_CLIENT_ID")
         idinfo = id_token.verify_oauth2_token(id_token_str, google_requests.Request(), client_id)
         
-        # Store user info and tokens in session or secure storage
-        request.session["user"] = {
+        # Create user info
+        user = {
             "id": idinfo["sub"],
             "email": idinfo["email"],
             "name": idinfo.get("name"),
             "picture": idinfo.get("picture")
         }
+        
+        # Store in session
+        request.session["user"] = user
         request.session["tokens"] = {
             "access_token": token_info.get("access_token"),
             "refresh_token": token_info.get("refresh_token"),
             "id_token": id_token_str
         }
         
-        # Redirect to accounts page
+        # Check if client accepts JSON
+        accept_header = request.headers.get("accept", "")
+        if "application/json" in accept_header:
+            return JSONResponse({
+                "success": True,
+                "user": user,
+                "tokens": {
+                    "access_token": token_info.get("access_token"),
+                    "id_token": id_token_str
+                }
+            })
+        
+        # Default to redirect response
         return RedirectResponse(url="/accounts", status_code=302)
         
     except Exception as e:
@@ -105,10 +139,11 @@ async def get_google_status(request: Request):
         user = request.session.get("user")
         if user:
             return {
-                "status": "success",
-                "email": user["email"]
+                "connected": True,
+                "email": user["email"],
+                "user": user
             }
-        return {"status": "not_authenticated"}
+        return {"connected": False}
     except Exception as e:
         logger.error(f"Error getting Google status: {str(e)}")
-        return {"status": "error"}
+        return {"connected": False}
