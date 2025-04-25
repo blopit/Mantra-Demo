@@ -7,9 +7,16 @@ from requests.sessions import Session
 from itsdangerous import URLSafeTimedSerializer
 from datetime import datetime, timedelta
 import os
+import pathlib
 
 # Server URL
 BASE_URL = "http://localhost:8000"
+
+def load_workflow_fixture():
+    """Load the test workflow fixture."""
+    fixture_path = pathlib.Path(__file__).parent.parent / "fixtures" / "test_workflow.json"
+    with open(fixture_path) as f:
+        return json.load(f)
 
 def test_workflow_creation():
     """Test creating and executing a workflow."""
@@ -39,55 +46,16 @@ def test_workflow_creation():
     # Set the session cookie
     session.cookies.set("session", signed_session)
     
-    # Create test workflow JSON
-    workflow_json = {
-        "nodes": [
-            {
-                "id": "1",
-                "type": "gmail",
-                "name": "Send Email",
-                "parameters": {
-                    "operation": "sendEmail",
-                    "to": "${trigger.email}",
-                    "subject": "Welcome to Mantra!",
-                    "text": "Thanks for trying out our workflow automation!"
-                }
-            },
-            {
-                "id": "2",
-                "type": "googleCalendar",
-                "name": "Create Event",
-                "parameters": {
-                    "operation": "createEvent",
-                    "calendar": "primary",
-                    "summary": "Onboarding Call",
-                    "description": "Welcome call with new user",
-                    "start": "${trigger.preferredTime}",
-                    "end": "${addHours(trigger.preferredTime, 1)}"
-                }
-            }
-        ],
-        "connections": {
-            "Send Email": {
-                "main": [["Create Event", 0]]
-            }
-        },
-        "trigger": {
-            "type": "webhook",
-            "parameters": {
-                "email": {"type": "string"},
-                "preferredTime": {"type": "string", "format": "date-time"}
-            }
-        }
-    }
+    # Load test workflow from fixture
+    workflow_data = load_workflow_fixture()
     
     # Create workflow
     create_response = session.post(
         f"{BASE_URL}/api/mantras/",
         json={
-            "name": "Test Workflow",
-            "description": "A test workflow",
-            "workflow_json": workflow_json,
+            "name": workflow_data["name"],
+            "description": workflow_data["description"],
+            "workflow_json": workflow_data["workflow_json"],
             "user_id": test_user["id"]
         }
     )
