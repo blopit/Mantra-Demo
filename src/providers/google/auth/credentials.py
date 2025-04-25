@@ -85,7 +85,7 @@ class GoogleCredentialsManager:
                 "token_uri": self.TOKEN_URI,
                 "client_id": self.client_id,
                 "client_secret": self.client_secret,
-                "scopes": ["https://www.googleapis.com/auth/gmail.readonly", 
+                "scopes": ["openid",
                           "https://www.googleapis.com/auth/userinfo.email",
                           "https://www.googleapis.com/auth/userinfo.profile"],
                 "expiry": int(time.time()) + token_info.get("expires_in", 3600)
