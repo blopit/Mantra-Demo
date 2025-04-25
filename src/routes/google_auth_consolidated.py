@@ -12,11 +12,11 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
 
+import aiohttp
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse, JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
 from google.oauth2.credentials import Credentials
@@ -30,6 +30,30 @@ from src.models.google_integration import GoogleIntegration
 
 # Configure logging
 logger = logging.getLogger(__name__)
+
+async def get_current_user(request: Request, db: Session = Depends(get_db)) -> Users:
+    """
+    Get the current authenticated user from the session.
+    
+    Args:
+        request: FastAPI request object
+        db: Database session
+        
+    Returns:
+        Users: Current authenticated user
+        
+    Raises:
+        HTTPException: If user is not authenticated
+    """
+    user_id = request.session.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+        
+    user = db.query(Users).filter_by(id=user_id).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+        
+    return user
 
 # Create router
 router = APIRouter(prefix="/api/google", tags=["Google Authentication"])
@@ -87,17 +111,19 @@ def build_google_oauth(scopes: List[str] = None):
 
 @router.get("/auth", response_model=AuthUrlResponse)
 async def get_auth_url(
+    request: Request,
     scopes: Optional[List[str]] = None,
     access_type: str = "offline",
-    include_granted_scopes: bool = True
+    include_granted_scopes: bool = False
 ):
     """
     Get Google OAuth URL for authentication.
     
     Args:
-        scopes: List of OAuth scopes to request
+        request: FastAPI request object
+        scopes: Optional list of scopes to request
         access_type: Whether to request offline access (for refresh tokens)
-        include_granted_scopes: Whether to include previously granted scopes
+        include_granted_scopes: Whether to include previously granted scopes (defaults to False)
         
     Returns:
         AuthUrlResponse: Object containing the authorization URL
@@ -108,8 +134,12 @@ async def get_auth_url(
         # Generate authorization URL with specified parameters
         authorization_url, state = flow.authorization_url(
             access_type=access_type,
-            include_granted_scopes="true" if include_granted_scopes else "false"
+            include_granted_scopes="false",  # Never include previously granted scopes
+            prompt="consent"  # Always show consent screen to ensure correct scopes
         )
+        
+        # Store state in session with the correct key
+        request.session["oauth_state"] = state
         
         return {"auth_url": authorization_url}
         
@@ -122,142 +152,92 @@ async def get_auth_url(
 
 @router.get("/callback")
 async def google_callback(
-    request: Request, 
-    code: Optional[str] = None,
-    state: Optional[str] = None,
+    request: Request,
+    code: str,
+    state: str,
     db: Session = Depends(get_db)
 ):
-    """
-    Handle Google OAuth callback.
-    
-    This endpoint processes the authorization code returned by Google,
-    exchanges it for access and refresh tokens, and stores the user's
-    information in the database.
-    
-    Args:
-        request: FastAPI request object
-        code: Authorization code from Google
-        state: State parameter from authorization request
-        db: Database session
-        
-    Returns:
-        RedirectResponse or JSONResponse depending on the Accept header
-    """
+    """Handle Google OAuth callback."""
     try:
-        if not code:
-            return RedirectResponse(url="/signin?error=No authorization code provided", status_code=302)
-
-        # Exchange the authorization code for tokens
-        flow = build_google_oauth()
-        flow.fetch_token(code=code)
-        credentials = flow.credentials
+        # Verify state to prevent CSRF
+        stored_state = request.session.get("oauth_state")
+        if not stored_state or stored_state != state:
+            raise HTTPException(status_code=400, detail="Invalid state parameter")
         
-        # Get user info
-        service = build("oauth2", "v2", credentials=credentials)
-        user_info = service.userinfo().get().execute()
+        # Get token from Google
+        token = await get_google_token(code)
+        if not token:
+            raise HTTPException(status_code=400, detail="Failed to get token")
         
-        # Create or update user
+        # Get user info from Google
+        user_info = await get_google_user_info(token["access_token"])
+        if not user_info:
+            raise HTTPException(status_code=400, detail="Failed to get user info")
+            
+        # Find or create user
         user = db.query(Users).filter_by(email=user_info["email"]).first()
         if not user:
             user = Users(
-                id=user_info["sub"],  # Use Google's sub field as user ID
+                id=str(uuid.uuid4()),
                 email=user_info["email"],
-                name=user_info.get("name"),
-                profile_picture=user_info.get("picture")
+                name=user_info.get("name", ""),
+                profile_picture=user_info.get("picture", "")
             )
             db.add(user)
             db.commit()
-            db.refresh(user)
             
-        # Store credentials
-        auth = db.query(GoogleAuth).filter_by(user_id=user.id).first()
-        if auth:
-            auth.access_token = credentials.token
-            auth.refresh_token = credentials.refresh_token
-            auth.token_uri = credentials.token_uri
-            auth.client_id = credentials.client_id
-            auth.client_secret = credentials.client_secret
-            auth.scopes = json.dumps(credentials.scopes)
-        else:
-            auth = GoogleAuth(
-                user_id=user.id,
-                access_token=credentials.token,
-                refresh_token=credentials.refresh_token,
-                token_uri=credentials.token_uri,
-                client_id=credentials.client_id,
-                client_secret=credentials.client_secret,
-                scopes=json.dumps(credentials.scopes)
-            )
-            db.add(auth)
-            
-        # Also update GoogleIntegration for backward compatibility
-        google_integration = db.query(GoogleIntegration).filter_by(
-            google_account_id=user_info["sub"]
+        # Store user in session
+        request.session["user"] = {
+            "id": user.id,
+            "email": user.email,
+            "name": user.name,
+            "profile_picture": user.profile_picture
+        }
+        
+        # Check if integration already exists
+        integration = db.query(GoogleIntegration).filter(
+            GoogleIntegration.user_id == user.id,
+            GoogleIntegration.google_account_id == user_info["sub"]
         ).first()
         
-        expires_at = datetime.utcnow() + timedelta(seconds=3600)  # Default 1 hour
-        
-        if not google_integration:
-            google_integration = GoogleIntegration(
+        if not integration:
+            # Create new integration
+            integration = GoogleIntegration(
                 id=str(uuid.uuid4()),
                 user_id=user.id,
                 google_account_id=user_info["sub"],
                 email=user_info["email"],
-                access_token=credentials.token,
-                refresh_token=credentials.refresh_token,
-                expires_at=expires_at,
-                scopes=credentials.scopes,
-                status="active"
+                service_name="google",
+                is_active=True,
+                status="connected",
+                access_token=token["access_token"],
+                refresh_token=token.get("refresh_token"),
+                expires_at=datetime.utcnow() + timedelta(seconds=token["expires_in"]),
+                scopes=",".join(token["scope"] if isinstance(token["scope"], list) else token["scope"].split(" ")),
+                settings=json.dumps({"profile": user_info})
             )
-            db.add(google_integration)
+            db.add(integration)
         else:
-            google_integration.access_token = credentials.token
-            if credentials.refresh_token:
-                google_integration.refresh_token = credentials.refresh_token
-            google_integration.expires_at = expires_at
-            google_integration.status = "active"
-            
+            # Update existing integration
+            integration.access_token = token["access_token"]
+            if "refresh_token" in token:
+                integration.refresh_token = token["refresh_token"]
+            integration.expires_at = datetime.utcnow() + timedelta(seconds=token["expires_in"])
+            integration.scopes = ",".join(token["scope"] if isinstance(token["scope"], list) else token["scope"].split(" "))
+            integration.is_active = True
+            integration.status = "connected"
+            integration.settings = json.dumps({"profile": user_info})
+            integration.disconnected_at = None
+        
         db.commit()
         
-        # Store in session
-        request.session["user"] = {
-            "id": user_info["sub"],
-            "email": user_info["email"],
-            "name": user_info.get("name"),
-            "picture": user_info.get("picture")
-        }
-        request.session["tokens"] = {
-            "access_token": credentials.token,
-            "refresh_token": credentials.refresh_token,
-            "id_token": credentials._id_token
-        }
-        
-        # Check if client accepts JSON
-        accept_header = request.headers.get("accept", "")
-        if "application/json" in accept_header:
-            return JSONResponse({
-                "success": True,
-                "user": {
-                    "id": user_info["sub"],
-                    "email": user_info["email"],
-                    "name": user_info.get("name"),
-                    "picture": user_info.get("picture")
-                },
-                "tokens": {
-                    "access_token": credentials.token,
-                    "id_token": credentials._id_token
-                }
-            })
-        
-        # Default to redirect response
-        return RedirectResponse(url="/accounts", status_code=302)
+        # Redirect to frontend with success
+        return RedirectResponse(url="/accounts")
         
     except Exception as e:
         logger.error(f"Error in Google callback: {str(e)}")
-        return RedirectResponse(
-            url=f"/signin?error={str(e)}",
-            status_code=302
-        )
+        # Redirect to frontend with error
+        return RedirectResponse(url=f"/signin?error={str(e)}")
 
 @router.get("/status", response_model=GoogleStatusResponse)
 async def get_google_status(request: Request, db: Session = Depends(get_db)):
@@ -286,13 +266,13 @@ async def get_google_status(request: Request, db: Session = Depends(get_db)):
             
         # If not in session, check database
         # This is useful for API clients that don't use sessions
-        auth = db.query(GoogleAuth).first()
-        if auth:
-            user = db.query(Users).filter_by(id=auth.user_id).first()
+        integration = db.query(GoogleIntegration).filter_by(is_active=True).first()
+        if integration:
+            user = db.query(Users).filter_by(id=integration.user_id).first()
             if user:
                 return {
                     "connected": True,
-                    "email": user.email,
+                    "email": integration.email,
                     "user": {
                         "email": user.email,
                         "name": user.name,
@@ -345,19 +325,16 @@ async def disconnect_google(request: Request, db: Session = Depends(get_db)):
             except Exception as e:
                 logger.warning(f"Error revoking token: {str(e)}")
         
-        # Remove from database
-        auth = db.query(GoogleAuth).filter_by(user_id=user["id"]).first()
-        if auth:
-            db.delete(auth)
-            
-        # Also update GoogleIntegration for backward compatibility
-        google_integration = db.query(GoogleIntegration).filter_by(
-            google_account_id=user["id"]
+        # Update GoogleIntegration
+        integration = db.query(GoogleIntegration).filter_by(
+            user_id=user["id"],
+            is_active=True
         ).first()
         
-        if google_integration:
-            google_integration.status = "inactive"
-            google_integration.disconnected_at = datetime.utcnow()
+        if integration:
+            integration.status = "inactive"
+            integration.is_active = False
+            integration.disconnected_at = datetime.utcnow()
             
         db.commit()
         
@@ -465,3 +442,45 @@ async def refresh_token(request: Request, db: Session = Depends(get_db)):
     except Exception as e:
         logger.error(f"Error refreshing token: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error refreshing token: {str(e)}")
+
+async def get_google_token(code: str) -> Optional[Dict[str, Any]]:
+    """
+    Exchange authorization code for tokens from Google.
+    
+    Args:
+        code: Authorization code from Google OAuth flow
+        
+    Returns:
+        Dict containing token information or None if request fails
+    """
+    try:
+        flow = build_google_oauth()
+        # fetch_token is synchronous, don't use await
+        token = flow.fetch_token(code=code)
+        return token
+    except Exception as e:
+        logger.error(f"Error getting Google token: {str(e)}")
+        return None
+
+async def get_google_user_info(access_token: str) -> Optional[Dict[str, Any]]:
+    """
+    Get user info from Google using access token.
+    
+    Args:
+        access_token: Valid Google OAuth access token
+        
+    Returns:
+        Dict containing user information or None if request fails
+    """
+    try:
+        headers = {"Authorization": f"Bearer {access_token}"}
+        async with aiohttp.ClientSession() as session:
+            async with session.get(GOOGLE_USERINFO_URI, headers=headers) as response:
+                if response.status == 200:
+                    return await response.json()
+                else:
+                    logger.error(f"Error getting user info: {await response.text()}")
+                    return None
+    except Exception as e:
+        logger.error(f"Error getting user info: {str(e)}")
+        return None

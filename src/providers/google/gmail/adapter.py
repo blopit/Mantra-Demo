@@ -25,6 +25,8 @@ logger = logging.getLogger(__name__)
 class GmailAdapter:
     """Adapter for Gmail integration"""
     
+    REQUIRED_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly'
+    
     def __init__(self):
         """Initialize the Gmail adapter"""
         self.service = None
@@ -47,6 +49,12 @@ class GmailAdapter:
                 self.credentials = credentials
                 self.user_email = "test@example.com"
                 return True
+            
+            # Check if Gmail scope is present
+            scopes = credentials.get('scopes', [])
+            if self.REQUIRED_SCOPE not in scopes:
+                logger.error(f"Gmail scope {self.REQUIRED_SCOPE} not present in credentials")
+                return False
                 
             # Convert dict credentials to Google Credentials object
             creds_obj = Credentials(
@@ -55,7 +63,7 @@ class GmailAdapter:
                 token_uri='https://oauth2.googleapis.com/token',
                 client_id=credentials.get('client_id'),
                 client_secret=credentials.get('client_secret'),
-                scopes=credentials.get('scopes', ['https://www.googleapis.com/auth/gmail.readonly'])
+                scopes=scopes
             )
             
             # Build the Gmail service

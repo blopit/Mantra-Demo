@@ -22,6 +22,7 @@ from src.models.users import Users
 from src.models.mantra import Mantra, MantraInstallation
 from src.main import app as main_app
 from src.routes.mantra import get_test_session
+from unittest.mock import patch
 
 # Add the project root directory to the Python path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -214,15 +215,44 @@ def mock_user_info():
     }
 
 @pytest.fixture
-def test_user(db_session):
+def mock_get_google_token():
+    """Mock the Google token endpoint response."""
+    with patch("src.routes.google_auth_consolidated.get_google_token") as mock:
+        yield mock
+
+@pytest.fixture
+def mock_get_google_user_info():
+    """Mock the Google user info endpoint response."""
+    with patch("src.routes.google_auth_consolidated.get_google_user_info") as mock:
+        yield mock
+
+@pytest.fixture
+def mock_revoke_token():
+    """Mock the Google token revocation endpoint."""
+    with patch("src.routes.google_auth_consolidated.revoke_google_token") as mock:
+        yield mock
+
+@pytest.fixture
+def test_user(test_db):
     """Create a test user."""
-    user_id = str(uuid.uuid4())
-    user = Users(
-        id=user_id,
-        email=f"test_{user_id}@example.com",  # Use a unique email
-        name="Test User"
+    user = User(
+        id=str(uuid.uuid4()),
+        email="test@example.com",
+        hashed_password="test_hashed_password"
     )
-    db_session.add(user)
-    db_session.commit()
-    db_session.refresh(user)
+    test_db.add(user)
+    test_db.commit()
     return user
+
+@pytest.fixture
+def test_db():
+    """Create a test database session."""
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    db = TestingSessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+        Base.metadata.drop_all(engine)
