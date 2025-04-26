@@ -56,7 +56,7 @@ class GoogleAuthManager:
 
     # Default OAuth scopes
     DEFAULT_SCOPES = [
-        'https://www.googleapis.com/auth/gmail.readonly',
+        'openid',
         'https://www.googleapis.com/auth/userinfo.email',
         'https://www.googleapis.com/auth/userinfo.profile'
     ]

@@ -43,67 +43,47 @@ python app.py
 
 Then open your browser to http://localhost:8000
 
-## How It Works
+## Environment Management
 
-1. User clicks the "Sign in with Google" button
-2. User can choose whether to store credentials in DATABASE_URL
-3. User is redirected to Google's OAuth consent screen
-4. After authentication, Google redirects back to the application
-5. The application stores the credentials in the database and optionally in DATABASE_URL
-6. The credentials can be accessed using the utility functions in `src/utils/google_credentials.py`
+Switch between development and production environments:
 
-## Code Organization
+```bash
+# Switch to development environment (SQLite)
+python scripts/switch_env.py development
 
-The project follows a modular architecture with clear separation of concerns:
+# Switch to production environment (PostgreSQL/Supabase)
+python scripts/switch_env.py production
 
-### Core Components
+# Test current database connection
+python scripts/switch_env.py test
+```
 
-- `app.py`: Main application entry point and FastAPI configuration
-- `src/models/`: SQLAlchemy database models
-  - `base.py`: Base model configuration
-  - `users.py`: User model
-  - `google_integration.py`: Google integration model
-  - `contacts.py`: Contacts model
-- `src/utils/`: Utility functions
-  - `database.py`: Database connection and session management
-  - `google_credentials.py`: Google credentials management
-  - `logger.py`: Logging configuration
+## Testing
 
-### Routes and API Endpoints
+Run the test suite:
 
-- `src/custom_routes/`: Custom route handlers
-  - `google/auth.py`: Google authentication routes
-  - `google/tile_routes.py`: Google tile-related routes
-- `src/routes/`: Standard route handlers
-  - `google.py`: Google service routes
-  - `google_auth.py`: Google authentication routes
-  - `google_integration.py`: Google integration routes
+```bash
+# Run all tests
+python scripts/run_tests.py
 
-### Service Providers
+# Run only unit tests
+python scripts/run_tests.py --unit
 
-- `src/providers/`: Service provider implementations
-  - `google/`: Google service providers
-    - `auth/`: Authentication components
-    - `calendar/`: Calendar service components
-    - `gmail/`: Gmail service components
-    - `common/`: Shared utilities
+# Run only integration tests
+python scripts/run_tests.py --integration
 
-### Templates and Static Files
+# Generate coverage report
+python scripts/run_tests.py --coverage
+```
 
-- `src/templates/`: HTML templates
-  - `google_signin.html`: Google sign-in page
+## Documentation
 
-### Tests
+Detailed documentation is available in the `docs` directory:
 
-- `tests/`: Test suite
-  - `unit/`: Unit tests
-  - `integration/`: Integration tests
-  - `conftest.py`: Test fixtures and configuration
-
-### Database Migrations
-
-- `alembic/`: Database migration scripts
-- `alembic.ini`: Alembic configuration
+- [Architecture](docs/architecture.md)
+- [API Routes](docs/routes/api_routes.md)
+- [Google Providers](docs/providers/google.md)
+- [Testing](docs/testing.md)
 
 ## Using the Credentials
 
@@ -122,97 +102,6 @@ credentials = get_credentials_object()
 from googleapiclient.discovery import build
 service = build('gmail', 'v1', credentials=credentials)
 ```
-
-### Using the Provider Classes
-
-The application provides high-level provider classes for interacting with Google services:
-
-```python
-# Using Gmail service
-from src.providers.google.gmail import GmailService
-from sqlalchemy.orm import Session
-
-def get_emails(user_id: str, db: Session):
-    gmail_service = GmailService(user_id, db)
-    messages = gmail_service.list_messages(max_results=10)
-    return messages
-
-# Using Calendar service
-from src.providers.google.calendar import CalendarService
-
-def get_events(user_id: str, db: Session):
-    calendar_service = CalendarService(user_id, db)
-    events = calendar_service.list_events()
-    return events
-```
-
-## Testing
-
-The project includes comprehensive unit and integration tests. To run the tests:
-
-### Install Testing Dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-### Run All Tests
-
-```bash
-./run_tests.py
-```
-
-### Run Specific Test Suites
-
-```bash
-# Run only unit tests
-./run_tests.py --unit
-
-# Run only integration tests
-./run_tests.py --integration
-
-# Run a specific test file
-./run_tests.py tests/unit/test_google_credentials.py
-
-# Run with verbose output
-./run_tests.py -v
-
-# Generate coverage report
-./run_tests.py --coverage
-```
-
-The coverage report will be generated in the `htmlcov` directory. Open `htmlcov/index.html` in your browser to view the report.
-
-## Architecture
-
-### Authentication Flow
-
-1. User initiates authentication via `/api/google/auth` endpoint
-2. Application generates a state token and redirects to Google OAuth consent screen
-3. User authenticates with Google and grants permissions
-4. Google redirects back to `/api/google/callback` with authorization code
-5. Application exchanges code for access and refresh tokens
-6. Tokens are stored in the database and optionally in DATABASE_URL
-7. User is now authenticated and can access Google services
-
-### Database Schema
-
-- **Users**: Stores user information
-  - id (UUID): Primary key
-  - email (String): User's email address
-  - name (String): User's name
-  - is_active (Boolean): User's active status
-  - created_at, updated_at: Timestamps
-
-- **GoogleIntegration**: Stores Google OAuth credentials
-  - id (UUID): Primary key
-  - user_id (UUID): Foreign key to Users
-  - email (String): Google account email
-  - access_token, refresh_token: OAuth tokens
-  - scopes: Authorized scopes
-  - token_expiry: Token expiration timestamp
-  - status: Integration status (active, disconnected)
-  - created_at, updated_at: Timestamps
 
 ## Known Issues and TODOs
 
