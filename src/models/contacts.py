@@ -5,20 +5,39 @@
 """
 
 from uuid import uuid4
-from sqlalchemy import Column, String, Float, DateTime, ForeignKey, Text, JSON
+from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Text, JSON
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from src.models.base import Base
 from src.models.custom_types import UUIDType
 
 class Contacts(Base):
-    """Contacts model representing connections to users"""
+    """
+    Model for storing contact information.
+    
+    This model maintains contact details for users and their associated
+    Google contacts integration.
+    
+    Attributes:
+        id (int): Primary key
+        user_id (str): Foreign key to Users table
+        email (str): Contact's email address
+        name (str): Contact's full name
+        source (str): Source of contact (e.g., 'google', 'manual')
+        external_id (str): ID from external system (e.g., Google Contacts ID)
+        created_at (datetime): Record creation timestamp
+        updated_at (datetime): Record last update timestamp
+    """
     __tablename__ = "contacts"
 
-    id = Column(UUIDType, primary_key=True, default=uuid4)
+    id = Column(Integer, primary_key=True)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False)
+    email = Column(String, nullable=False)
+    name = Column(String)
+    source = Column(String, nullable=False)
+    external_id = Column(String)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-    name = Column(String(100), nullable=False)
     avatar = Column(String(255))
     apps = Column(JSON)
     ai_engagement_score = Column(Float)
@@ -39,12 +58,11 @@ class Contacts(Base):
     relationship_summary = Column(Text)
     communication_style = Column(String(50))
     birthday = Column(String(20))
-    user_id = Column(UUIDType, ForeignKey('users.id', ondelete="CASCADE"))
 
-    # Relationship
+    # Relationships
     user = relationship("Users", back_populates="contacts")
 
     def __repr__(self):
-        return f"<Contact(id={self.id}, name={self.name})>"
+        return f"<Contact {self.email} for user {self.user_id}>"
     
     

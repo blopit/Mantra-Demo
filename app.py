@@ -59,17 +59,22 @@ templates = Jinja2Templates(directory="src/templates")
 app.mount("/static", StaticFiles(directory="src/static"), name="static")
 
 # Import and include routes
-from src.routes.google import router as google_router
-app.include_router(google_router)
+from src.routes.google_auth_consolidated import router as google_auth_router
+from src.routes.mantra import router as mantra_router
+app.include_router(google_auth_router)
+app.include_router(mantra_router)
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     """Redirect to accounts if logged in, otherwise show sign-in page"""
     # Check if user is authenticated
     user = request.session.get("user")
-    if user:
+
+    # If user is authenticated and explicitly requesting root, redirect to accounts
+    if user and request.url.path == "/":
         return RedirectResponse(url="/accounts", status_code=302)
-        
+
+    # Otherwise show sign-in page
     return templates.TemplateResponse(
         "google_signin.html",
         {
@@ -89,7 +94,7 @@ async def signin(
     user = request.session.get("user")
     if user and not status:  # Only redirect if there's no status message to show
         return RedirectResponse(url="/accounts", status_code=302)
-        
+
     return templates.TemplateResponse(
         "google_signin.html",
         {
@@ -107,7 +112,7 @@ async def accounts(request: Request):
     user = request.session.get("user")
     if not user:
         return RedirectResponse(url="/signin?status=Please sign in to access your account", status_code=302)
-        
+
     return templates.TemplateResponse(
         "accounts.html",
         {
