@@ -2,7 +2,7 @@
 Test script for the Google workflow transformer.
 """
 import logging
-from workflow_transformer import GoogleWorkflowTransformer
+from .workflow_transformer import GoogleWorkflowTransformer
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

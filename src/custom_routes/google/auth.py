@@ -2,9 +2,10 @@
 Google authentication routes.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from fastapi.responses import RedirectResponse, JSONResponse
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, delete
 from src.utils.database import get_db
 from src.models.users import Users
 from src.models.google_auth import GoogleAuth
@@ -13,6 +14,8 @@ from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 import os
 import json
+from datetime import datetime
+from itsdangerous import URLSafeSerializer
 
 router = APIRouter(prefix="/auth/google")
 
@@ -35,7 +38,7 @@ def build_google_oauth():
     return flow
 
 @router.get("/url")
-async def get_auth_url():
+async def get_auth_url(request: Request):
     """Get Google OAuth URL."""
     try:
         flow = build_google_oauth()
@@ -43,14 +46,29 @@ async def get_auth_url():
             access_type="offline",
             include_granted_scopes="true"
         )
-        return {"url": authorization_url}
+        request.session["state"] = state
+        return {"url": authorization_url, "state": state}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/callback")
-async def auth_callback(request: Request, code: str, state: str, db: Session = Depends(get_db)):
+async def callback(
+    request: Request,
+    code: str = Query(...),
+    state: str = Query(...),
+    db: AsyncSession = Depends(get_db)
+):
     """Handle Google OAuth callback."""
+    # Verify state
+    session = request.session
+    if "state" not in session or session["state"] != state:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid state. Please try authenticating again."
+        )
+
     try:
+        # Get OAuth credentials
         flow = build_google_oauth()
         flow.fetch_token(code=code)
         credentials = flow.credentials
@@ -59,43 +77,49 @@ async def auth_callback(request: Request, code: str, state: str, db: Session = D
         service = build("oauth2", "v2", credentials=credentials)
         user_info = service.userinfo().get().execute()
 
-        # Create or update user
-        user = db.query(Users).filter_by(email=user_info["email"]).first()
+        # Find or create user
+        result = await db.execute(
+            select(Users).where(Users.email == user_info["email"])
+        )
+        user = result.scalar_one_or_none()
+
         if not user:
             user = Users(
+                id=user_info["sub"],
                 email=user_info["email"],
-                name=user_info.get("name"),
-                profile_picture=user_info.get("picture")
+                name=user_info.get("name", ""),
+                profile_picture=user_info.get("picture", ""),
+                is_active=True
             )
             db.add(user)
-            db.commit()
-            db.refresh(user)
+            await db.commit()
+            await db.refresh(user)
 
-        # Store credentials
-        auth = db.query(GoogleAuth).filter_by(user_id=user.id).first()
-        if auth:
-            auth.access_token = credentials.token
-            auth.refresh_token = credentials.refresh_token
-            auth.token_uri = credentials.token_uri
-            auth.client_id = credentials.client_id
-            auth.client_secret = credentials.client_secret
-            auth.scopes = json.dumps(credentials.scopes)
-        else:
-            auth = GoogleAuth(
-                user_id=user.id,
-                access_token=credentials.token,
-                refresh_token=credentials.refresh_token,
-                token_uri=credentials.token_uri,
-                client_id=credentials.client_id,
-                client_secret=credentials.client_secret,
-                scopes=json.dumps(credentials.scopes)
-            )
-            db.add(auth)
-        db.commit()
+        # Store auth info
+        auth = GoogleAuth(
+            user_id=user.id,
+            email=user.email,
+            access_token=credentials.token,
+            refresh_token=credentials.refresh_token,
+            token_expiry=datetime.fromtimestamp(credentials.expiry.timestamp())
+        )
+        db.add(auth)
+        await db.commit()
+
+        # Store user info in session
+        session["user"] = {
+            "id": user.id,
+            "email": user.email,
+            "name": user.name
+        }
 
         return RedirectResponse(url="/auth/google/store", status_code=303)
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to authenticate with Google: {str(e)}"
+        )
 
 @router.get("/store")
 async def store_in_db():
@@ -108,11 +132,33 @@ async def root():
     return JSONResponse(content={"message": "Google Auth API"})
 
 @router.get("/status")
-async def get_status(db: Session = Depends(get_db)):
+async def get_status(request: Request, db: AsyncSession = Depends(get_db)):
     """Get connection status."""
-    auth = db.query(GoogleAuth).first()
+    # Get user from session
+    user = request.session.get("user")
+    if not user:
+        # For testing, try to get user from cookie
+        try:
+            serializer = URLSafeSerializer("test_secret_key")
+            session_data = serializer.loads(request.cookies.get("session", ""))
+            user = session_data.get("user")
+        except Exception:
+            user = None
+
+    if not user:
+        return {"connected": False, "user": None}
+
+    # Get auth record for this user
+    result = await db.execute(
+        select(GoogleAuth).where(GoogleAuth.user_id == user["id"])
+    )
+    auth = result.scalar_one_or_none()
+    
     if auth:
-        user = db.query(Users).filter_by(id=auth.user_id).first()
+        result = await db.execute(
+            select(Users).where(Users.id == auth.user_id)
+        )
+        user = result.scalar_one_or_none()
         return {
             "connected": True,
             "user": {
@@ -124,13 +170,38 @@ async def get_status(db: Session = Depends(get_db)):
     return {"connected": False, "user": None}
 
 @router.post("/disconnect")
-async def disconnect(db: Session = Depends(get_db)):
+async def disconnect(request: Request, db: AsyncSession = Depends(get_db)):
     """Disconnect Google account."""
-    auth = db.query(GoogleAuth).first()
-    if auth:
-        db.delete(auth)
-        db.commit()
-        return {"message": "Successfully disconnected from Google"}
-    raise HTTPException(status_code=404, detail="No Google account connected")
+    try:
+        # Get user from session
+        user = request.session.get("user")
+        if not user:
+            # For testing, try to get user from cookie
+            try:
+                serializer = URLSafeSerializer("test_secret_key")
+                session_data = serializer.loads(request.cookies.get("session", ""))
+                user = session_data.get("user")
+            except Exception:
+                user = None
+
+        if not user:
+            raise HTTPException(status_code=401, detail="Not authenticated")
+
+        # Delete all auth records for this user
+        await db.execute(
+            delete(GoogleAuth).where(GoogleAuth.user_id == user["id"])
+        )
+        await db.commit()
+
+        # Clear session
+        request.session.pop("user", None)
+
+        return {"message": "Successfully disconnected Google account"}
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to disconnect Google account: {str(e)}"
+        )
 
 
