@@ -59,6 +59,7 @@ class MantraInstallation(Base):
         installed_at (datetime): When the mantra was installed
         status (str): Current status (active, paused, error)
         config (JSON): User-specific configuration for the mantra
+        n8n_workflow_id (Integer): ID of the activated workflow in n8n
     
     Relationships:
         mantra: Many-to-one relationship with Mantra
@@ -72,6 +73,7 @@ class MantraInstallation(Base):
     installed_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     status = Column(String, default="active")
     config = Column(JSON)
+    n8n_workflow_id = Column(Integer)
     
     # Relationships
     mantra = relationship("Mantra", back_populates="installations")

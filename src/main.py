@@ -48,9 +48,11 @@ app.add_middleware(
 # Import and include routes
 from src.routes.google_auth_consolidated import router as google_auth_router
 from src.routes.mantra import router as mantra_router
+from src.api.mantras import router as mantras_api_router
 
 app.include_router(google_auth_router)
 app.include_router(mantra_router)
+app.include_router(mantras_api_router)
 
 @app.get("/")
 async def root():

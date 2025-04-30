@@ -22,6 +22,7 @@ from google.auth.transport import requests as google_requests
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
+from sqlalchemy import select
 
 from src.utils.database import get_db
 from src.models.users import Users
@@ -301,22 +302,49 @@ async def disconnect_google(request: Request, db: Session = Depends(get_db)):
         JSONResponse: Success message or error
     """
     try:
-        # Get user from session
-        user = request.session.get("user")
-        if not user:
-            raise HTTPException(status_code=401, detail="Not authenticated")
+        # Get auth record from database
+        result = await db.execute(select(GoogleAuth))
+        auth = result.scalar_one_or_none()
+        if not auth:
+            # Try to get from GoogleIntegration table
+            result = await db.execute(select(GoogleIntegration).where(GoogleIntegration.is_active == True))
+            integration = result.scalar_one_or_none()
+            if not integration:
+                raise HTTPException(status_code=404, detail="No Google account connected")
             
-        # Revoke token with Google
-        tokens = request.session.get("tokens", {})
-        access_token = tokens.get("access_token")
-        
-        if access_token:
+            # Revoke token with Google if available
+            if integration.access_token:
+                try:
+                    # Attempt to revoke the token
+                    response = google_requests.Request().session.post(
+                        "https://oauth2.googleapis.com/revoke",
+                        params={"token": integration.access_token},
+                        headers={"Content-Type": "application/x-www-form-urlencoded"}
+                    )
+                    
+                    if not response.ok:
+                        logger.warning(f"Failed to revoke token: {response.text}")
+                except Exception as e:
+                    logger.warning(f"Error revoking token: {str(e)}")
+            
+            # Mark integration as inactive
+            integration.is_active = False
+            integration.status = "disconnected"
+            integration.disconnected_at = datetime.utcnow()
+            await db.commit()
+            
+            return JSONResponse({
+                "success": True,
+                "message": "Successfully disconnected from Google"
+            })
+            
+        # Revoke token with Google if available
+        if auth.access_token:
             try:
                 # Attempt to revoke the token
-                requests = google_requests.Request()
-                response = requests.session.post(
+                response = google_requests.Request().session.post(
                     "https://oauth2.googleapis.com/revoke",
-                    params={"token": access_token},
+                    params={"token": auth.access_token},
                     headers={"Content-Type": "application/x-www-form-urlencoded"}
                 )
                 
@@ -325,22 +353,9 @@ async def disconnect_google(request: Request, db: Session = Depends(get_db)):
             except Exception as e:
                 logger.warning(f"Error revoking token: {str(e)}")
         
-        # Update GoogleIntegration
-        integration = db.query(GoogleIntegration).filter_by(
-            user_id=user["id"],
-            is_active=True
-        ).first()
-        
-        if integration:
-            integration.status = "inactive"
-            integration.is_active = False
-            integration.disconnected_at = datetime.utcnow()
-            
-        db.commit()
-        
-        # Clear session
-        request.session.pop("user", None)
-        request.session.pop("tokens", None)
+        # Delete the auth record
+        await db.delete(auth)
+        await db.commit()
         
         return JSONResponse({
             "success": True,

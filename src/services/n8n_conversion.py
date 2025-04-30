@@ -14,6 +14,7 @@ from typing import Dict, List, Any, Optional
 from fastapi import Depends, HTTPException, status
 import requests
 from sqlalchemy.orm import Session
+import os
 
 from src.utils.database import get_db
 from src.models.users import Users
@@ -404,4 +405,70 @@ class N8nConversionService:
                     'success': False,
                     'message': f"Error executing request: {str(e)}"
                 }
-            } 
+            }
+
+    def _get_n8n_base_url(self) -> str:
+        url = os.getenv('N8N_WEBHOOK_URL')
+        if not url:
+            raise RuntimeError('N8N_WEBHOOK_URL is not set in environment')
+        return url.rstrip('/')
+
+    def _get_n8n_api_key(self) -> str:
+        key = os.getenv('N8N_API_KEY')
+        if not key:
+            raise RuntimeError('N8N_API_KEY is not set in environment')
+        return key
+
+    def create_workflow_in_n8n(self, workflow_json: dict) -> dict:
+        """
+        Create (import) a workflow in n8n via REST API.
+        Returns the n8n workflow object (including id).
+        """
+        base_url = self._get_n8n_base_url()
+        api_key = self._get_n8n_api_key()
+        url = f"{base_url}/api/v1/workflows"
+        headers = {
+            "Content-Type": "application/json",
+            "X-N8N-API-KEY": api_key,
+        }
+        try:
+            resp = requests.post(url, headers=headers, json=workflow_json, timeout=30)
+            resp.raise_for_status()
+            return resp.json()
+        except Exception as e:
+            logger.error(f"Failed to create workflow in n8n: {e}")
+            raise HTTPException(status_code=500, detail=f"n8n workflow creation failed: {e}")
+
+    def activate_workflow_in_n8n(self, workflow_id: int) -> bool:
+        """
+        Activate a workflow in n8n by ID.
+        Returns True if successful.
+        """
+        base_url = self._get_n8n_base_url()
+        api_key = self._get_n8n_api_key()
+        url = f"{base_url}/api/v1/workflows/{workflow_id}/activate"
+        headers = {"X-N8N-API-KEY": api_key}
+        try:
+            resp = requests.post(url, headers=headers, timeout=30)
+            resp.raise_for_status()
+            return resp.status_code == 200
+        except Exception as e:
+            logger.error(f"Failed to activate workflow {workflow_id} in n8n: {e}")
+            raise HTTPException(status_code=500, detail=f"n8n workflow activation failed: {e}")
+
+    def deactivate_workflow_in_n8n(self, workflow_id: int) -> bool:
+        """
+        Deactivate a workflow in n8n by ID.
+        Returns True if successful.
+        """
+        base_url = self._get_n8n_base_url()
+        api_key = self._get_n8n_api_key()
+        url = f"{base_url}/api/v1/workflows/{workflow_id}/deactivate"
+        headers = {"X-N8N-API-KEY": api_key}
+        try:
+            resp = requests.post(url, headers=headers, timeout=30)
+            resp.raise_for_status()
+            return resp.status_code == 200
+        except Exception as e:
+            logger.error(f"Failed to deactivate workflow {workflow_id} in n8n: {e}")
+            raise HTTPException(status_code=500, detail=f"n8n workflow deactivation failed: {e}") 
