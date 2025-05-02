@@ -95,7 +95,7 @@ async def list_mantras(
 ):
     """List all available mantras"""
     service = MantraService(db, n8n_service)
-    mantras = service.get_mantras(skip, limit)
+    mantras = await service.get_mantras(skip, limit)
     return [
         {
             "id": str(m.id),
@@ -115,7 +115,7 @@ async def get_mantra(
 ):
     """Get a specific mantra by ID"""
     service = MantraService(db, n8n_service)
-    mantra = service.get_mantra_by_id(mantra_id)
+    mantra = await service.get_mantra(mantra_id)
     return {
         "id": str(mantra.id),
         "name": mantra.name,
@@ -192,7 +192,7 @@ async def update_installation_status(
 ):
     """Update the status of an installed mantra"""
     service = MantraService(db, n8n_service)
-    installation = service.update_mantra_status(installation_id, status)
+    installation = await service.update_mantra_status(installation_id, status)
     return {
         "installation_id": str(installation.id),
         "status": installation.status,
@@ -205,9 +205,9 @@ async def get_user_mantras(
     db: Session = Depends(get_db),
     n8n_service: N8nService = Depends(get_n8n_service)
 ):
-    """Get all mantras installed by a user"""
+    """Get all mantras for a specific user"""
     service = MantraService(db, n8n_service)
-    return service.get_user_mantras(user_id)
+    return await service.get_user_installations(user_id)
 
 @router.post("/installations/{installation_id}/execute", response_model=Dict[str, Any])
 async def execute_mantra(

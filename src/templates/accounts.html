@@ -274,6 +274,61 @@
         .tab-content.active {
             display: block;
         }
+        
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1000;
+            min-width: 300px;
+            max-width: 500px;
+            padding: 15px;
+            border-radius: 4px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            animation: slideIn 0.3s ease-out;
+        }
+        
+        .notification.success {
+            background-color: #4caf50;
+            color: white;
+        }
+        
+        .notification.error {
+            background-color: #f44336;
+            color: white;
+        }
+        
+        .notification-content {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        
+        .notification-message {
+            flex-grow: 1;
+            margin-right: 10px;
+        }
+        
+        .notification-close {
+            background: none;
+            border: none;
+            color: white;
+            font-size: 20px;
+            cursor: pointer;
+            padding: 0;
+            line-height: 1;
+        }
+        
+        @keyframes slideIn {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
     </style>
 </head>
 <body>
@@ -529,18 +584,18 @@
 
                 console.log('Creating workflow with:', { name, description, workflowJson });
                 
-                // Create URL with query parameters for required fields
-                const url = new URL('/api/mantras/', window.location.origin);
-                url.searchParams.append('name', name);
-                url.searchParams.append('description', description);
-                url.searchParams.append('user_id', userStatus.user.id);
-                
-                const createResponse = await fetch(url, {
+                // Send request with all fields in the body
+                const createResponse = await fetch('/api/mantras/', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify(workflowJson)
+                    body: JSON.stringify({
+                        name: name,
+                        description: description,
+                        user_id: userStatus.user.id,
+                        workflow_json: workflowJson
+                    })
                 });
                 
                 if (!createResponse.ok) {
@@ -552,9 +607,17 @@
                     throw new Error(errorData.detail || 'Failed to create workflow');
                 }
                 
+                const result = await createResponse.json();
+                console.log('Workflow created successfully:', result);
+                
                 alert('Workflow created successfully!');
                 loadAvailableMantras();
                 switchTab('available');
+                
+                // Clear form
+                document.getElementById('workflow-name').value = '';
+                document.getElementById('workflow-description').value = '';
+                document.getElementById('workflow-json').value = '';
                 
             } catch (error) {
                 console.error('Error creating workflow:', error);
@@ -565,26 +628,66 @@
         // Install workflow
         async function installWorkflow(mantraId) {
             try {
-                const response = await fetch(`/api/mantras/${mantraId}/install`, {
+                // Show loading state
+                const button = document.querySelector(`[data-mantra-id="${mantraId}"]`);
+                const originalText = button.textContent;
+                button.disabled = true;
+                button.textContent = 'Installing...';
+                
+                const response = await fetch(`/api/mantras/${mantraId}/install?user_id=${userProfile.id}`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        user_id: userProfile.id
-                    })
+                    }
                 });
                 
+                const data = await response.json();
+                
                 if (response.ok) {
-                    alert('Mantra installed successfully!');
+                    showNotification('success', 'Mantra installed successfully!');
                     loadInstalledMantras();
                     switchTab('installed');
                 } else {
-                    throw new Error('Failed to install mantra');
+                    // Handle different error types
+                    let errorMessage = 'Failed to install mantra';
+                    
+                    if (data.detail) {
+                        if (typeof data.detail === 'string') {
+                            errorMessage = data.detail;
+                        } else if (data.detail.message) {
+                            errorMessage = data.detail.message;
+                        }
+                    }
+                    
+                    // Check for specific error types
+                    if (response.status === 400) {
+                        if (errorMessage.includes('Invalid workflow format')) {
+                            errorMessage = 'The workflow format is invalid. Please check the workflow configuration.';
+                        } else if (errorMessage.includes('already installed')) {
+                            errorMessage = 'This mantra is already installed for your account.';
+                        }
+                    } else if (response.status === 404) {
+                        errorMessage = 'The mantra could not be found.';
+                    } else if (response.status === 500) {
+                        errorMessage = 'An internal server error occurred. Please try again later.';
+                    }
+                    
+                    showNotification('error', errorMessage);
+                    console.error('Error installing mantra:', {
+                        status: response.status,
+                        data: data
+                    });
                 }
             } catch (error) {
                 console.error('Error installing mantra:', error);
-                alert('Error installing mantra: ' + error.message);
+                showNotification('error', 'Failed to communicate with the server. Please check your connection and try again.');
+            } finally {
+                // Reset button state
+                const button = document.querySelector(`[data-mantra-id="${mantraId}"]`);
+                if (button) {
+                    button.disabled = false;
+                    button.textContent = originalText;
+                }
             }
         }
 
@@ -748,6 +851,23 @@
                 console.error('Error initiating Google sign-in:', error);
                 alert('Error starting authentication. Please try again.');
             }
+        }
+
+        function showNotification(type, message) {
+            const notification = document.createElement('div');
+            notification.className = `notification ${type}`;
+            notification.innerHTML = `
+                <div class="notification-content">
+                    <span class="notification-message">${message}</span>
+                    <button class="notification-close" onclick="this.parentElement.parentElement.remove()">×</button>
+                </div>
+            `;
+            document.body.appendChild(notification);
+            
+            // Auto-hide after 5 seconds
+            setTimeout(() => {
+                notification.remove();
+            }, 5000);
         }
     </script>
 </body>

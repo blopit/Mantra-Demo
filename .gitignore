@@ -173,3 +173,8 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# User Profile
+.cursor/user_profile/
+.cursor/user_profile/*
+!.cursor/user_profile/example.json

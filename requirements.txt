@@ -12,6 +12,7 @@ python-multipart==0.0.6
 itsdangerous==2.1.2
 sqlalchemy==2.0.20
 beautifulsoup4==4.12.2
+jsonschema==4.21.1
 
 # Testing dependencies
 pytest==7.4.0

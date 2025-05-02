@@ -16,8 +16,10 @@ import uuid
 import logging
 from sqlalchemy import create_engine, TypeDecorator, String, text
 from sqlalchemy.orm import sessionmaker, declarative_base
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.pool import QueuePool, NullPool
 from dotenv import load_dotenv
+from typing import AsyncGenerator
 
 # Load environment variables from .env file
 load_dotenv()
@@ -32,6 +34,8 @@ from src.models.contacts import Contacts
 from src.models.google_auth import GoogleAuth
 from src.models.google_integration import GoogleIntegration
 from src.models.mantra import Mantra, MantraInstallation
+
+from src.adapters.database.factory import DatabaseAdapterFactory
 
 class SQLiteUUID(TypeDecorator):
     """Platform-independent UUID type for SQLite.
@@ -72,7 +76,7 @@ def get_database_url():
     # For testing, always use in-memory SQLite
     if os.getenv("TESTING", "").lower() == "true":
         logger.info("Using in-memory SQLite database for testing")
-        return "sqlite://"
+        return "sqlite+aiosqlite://"
 
     # Check environment (development or production)
     env = os.getenv("ENVIRONMENT", os.getenv("ENV", "development")).lower()
@@ -90,7 +94,7 @@ def get_database_url():
 
         # Default to SQLite for development
         logger.info("Using default SQLite database for development")
-        return "sqlite:///mantra_dev.db"
+        return "sqlite+aiosqlite:///mantra_dev.db"
 
     # Production mode - use DATABASE_URL
     db_url = os.getenv("DATABASE_URL")
@@ -103,7 +107,7 @@ def get_database_url():
 
     # Fallback to SQLite if no production URL is set
     logger.warning("No DATABASE_URL found, falling back to SQLite for production")
-    return "sqlite:///mantra.db"
+    return "sqlite+aiosqlite:///mantra.db"
 
 def get_engine(database_url=None):
     """
@@ -124,10 +128,6 @@ def get_engine(database_url=None):
 
     # Get environment variables for configuration
     debug_mode = os.getenv("DEBUG", "False").lower() == "true"
-    pool_size = int(os.getenv("POOL_SIZE", "5"))
-    max_overflow = int(os.getenv("MAX_OVERFLOW", "10"))
-    pool_timeout = int(os.getenv("POOL_TIMEOUT", "30"))
-    pool_recycle = int(os.getenv("POOL_RECYCLE", "1800"))  # 30 minutes
 
     # Common engine arguments
     connect_args = {}
@@ -140,41 +140,28 @@ def get_engine(database_url=None):
     if database_url.startswith("sqlite"):
         # SQLite-specific optimizations
         connect_args["check_same_thread"] = False
-
-        # For SQLite, use NullPool for in-memory DB or a small pool for file DB
-        if database_url == "sqlite://":
-            # In-memory SQLite should not use connection pooling
-            engine_args["poolclass"] = NullPool
-            logger.info("Using NullPool for in-memory SQLite database")
-        else:
-            # For file-based SQLite, a small connection pool is better
-            engine_args["pool_size"] = min(pool_size, 3)  # SQLite works better with fewer connections
-            engine_args["max_overflow"] = 0  # Prevent overflow connections for SQLite
-            logger.info(f"Using small connection pool (size={min(pool_size, 3)}) for SQLite database")
+        engine_args["poolclass"] = NullPool
+        logger.info("Using NullPool for SQLite database")
 
     elif database_url.startswith("postgresql"):
         # PostgreSQL-specific optimizations
-        engine_args["poolclass"] = QueuePool
-        engine_args["pool_size"] = pool_size
-        engine_args["max_overflow"] = max_overflow
-        engine_args["pool_timeout"] = pool_timeout
-        engine_args["pool_recycle"] = pool_recycle
+        pool_size = int(os.getenv("POOL_SIZE", "5"))
+        max_overflow = int(os.getenv("MAX_OVERFLOW", "10"))
+        pool_timeout = int(os.getenv("POOL_TIMEOUT", "30"))
+        pool_recycle = int(os.getenv("POOL_RECYCLE", "1800"))  # 30 minutes
 
-        # Add PostgreSQL-specific optimizations
-        engine_args["pool_pre_ping"] = True  # Verify connections before using them
+        engine_args.update({
+            "poolclass": QueuePool,
+            "pool_size": pool_size,
+            "max_overflow": max_overflow,
+            "pool_timeout": pool_timeout,
+            "pool_recycle": pool_recycle,
+            "pool_pre_ping": True  # Verify connections before using them
+        })
         logger.info(f"Using QueuePool for PostgreSQL database (size={pool_size}, max_overflow={max_overflow})")
 
-    else:
-        # Generic configuration for other database types
-        engine_args["poolclass"] = QueuePool
-        engine_args["pool_size"] = pool_size
-        engine_args["max_overflow"] = max_overflow
-        engine_args["pool_timeout"] = pool_timeout
-        engine_args["pool_recycle"] = pool_recycle
-        logger.info(f"Using generic connection pool for database: {database_url.split(':')[0]}")
-
     # Create and return the engine
-    return create_engine(
+    return create_async_engine(
         database_url,
         connect_args=connect_args,
         **engine_args
@@ -196,10 +183,9 @@ def get_session_local(engine=None):
     if engine is None:
         engine = get_engine()
 
-    return sessionmaker(
-        autocommit=False,
-        autoflush=False,
+    return async_sessionmaker(
         bind=engine,
+        class_=AsyncSession,
         expire_on_commit=False,  # Performance optimization to prevent unnecessary DB hits
         future=True  # Use SQLAlchemy 2.0 query style for better performance
     )
@@ -208,51 +194,56 @@ def get_session_local(engine=None):
 engine = get_engine()
 SessionLocal = get_session_local(engine)
 
-def get_db():
-    """
-    Dependency to get database session for FastAPI endpoints.
-
-    This function creates a new database session for each request,
-    yields it for use in the endpoint, and ensures it's closed
-    when the request is complete, even if an exception occurs.
-
-    Usage:
-        @app.get("/users")
-        def get_users(db: Session = Depends(get_db)):
-            users = db.query(Users).all()
-            return users
-
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
+    """Get a database session.
+    
+    This is a FastAPI dependency that provides a database session
+    for route handlers.
+    
     Yields:
-        Session: SQLAlchemy database session
+        AsyncSession: A database session
     """
-    db = SessionLocal()
-    try:
-        # Execute a simple query to verify the connection is working
-        # This helps catch connection issues early
-        db.execute(text("SELECT 1"))
-        yield db
-    except Exception as e:
-        logger.error(f"Database connection error: {str(e)}")
-        raise
-    finally:
-        db.close()
-
-# Initialize database tables
-def init_db():
-    """
-    Initialize database tables.
-
-    This function creates all tables defined in the models if they don't exist.
-    It's only run if not in testing mode and not using migrations.
-    """
-    if os.getenv("TESTING") != "true" and os.getenv("USE_MIGRATIONS", "False").lower() != "true":
-        logger.info("Creating database tables...")
+    adapter = await DatabaseAdapterFactory.get_adapter()
+    session_cm = await adapter.get_session()
+    async with session_cm as session:
         try:
-            Base.metadata.create_all(bind=engine)
-            logger.info("Database tables created successfully")
-        except Exception as e:
-            logger.error(f"Error creating database tables: {str(e)}")
-            raise
+            yield session
+        finally:
+            await session.close()
 
-# Create all tables - only if not in testing mode and not using migrations
-init_db()
+async def init_db() -> None:
+    """Initialize the database connection.
+    
+    This function should be called during application startup.
+    """
+    try:
+        environment = os.getenv("ENVIRONMENT", "development").lower()
+        logger.info(f"Current environment: {environment}")
+        
+        # Log database configuration
+        if environment == "development":
+            logger.info("Using default SQLite database for development")
+            logger.info("Using NullPool for SQLite database")
+        else:
+            logger.info("Using PostgreSQL database for production/staging")
+            logger.info(f"Pool size: {os.getenv('POOL_SIZE', '5')}")
+            logger.info(f"Max overflow: {os.getenv('MAX_OVERFLOW', '10')}")
+        
+        # Initialize the database adapter
+        await DatabaseAdapterFactory.get_adapter()
+        
+    except Exception as e:
+        logger.error(f"Error initializing database: {str(e)}")
+        raise
+
+async def close_db() -> None:
+    """Close the database connection.
+    
+    This function should be called during application shutdown.
+    """
+    try:
+        await DatabaseAdapterFactory.close_adapter()
+        logger.info("Closed database connection")
+    except Exception as e:
+        logger.error(f"Error closing database connection: {str(e)}")
+        raise
