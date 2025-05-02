@@ -1,0 +1,62 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+description: "Rule for using and respecting user profiles"
+alwaysApply: true
+
+# User Profile Usage Rule
+
+## Purpose
+- Customize agent behavior based on user preferences
+- Maintain consistent interaction patterns
+- Respect user-specific settings and boundaries
+- Enable personalized automation
+
+## Implementation
+1. Profile Loading:
+   - Check for user profile at startup
+   - Load preferences and settings
+   - Apply customizations to agent behavior
+   - Fall back to defaults if no profile exists
+
+2. Profile Sections:
+   - User Information
+   - Communication Preferences
+   - Development Preferences
+   - Automation Settings
+   - Safety Boundaries
+   - Tool Preferences
+   - Project Defaults
+   - Agent Customization
+
+3. Profile Updates:
+   - Learn from user interactions
+   - Suggest profile updates
+   - Never modify profile directly
+   - Keep sensitive information private
+
+4. Usage Guidelines:
+   - Always check profile before taking autonomous action
+   - Respect automation preferences
+   - Follow communication style preferences
+   - Adhere to safety boundaries
+   - Use preferred tools and frameworks
+
+5. Default Behavior:
+   - If no profile exists, use conservative defaults
+   - Always prioritize safety
+   - Ask for confirmation when unsure
+   - Document decisions and actions
+
+## Profile Location
+- Primary: .cursor/user_profile/{username}.json
+- Example: .cursor/user_profile/example.json
+- Ignored in Git: .cursor/user_profile/ in .gitignore
+
+## Security
+- Never commit user profiles to version control
+- Keep sensitive information out of profiles
+- Use environment variables for secrets
+- Respect .gitignore settings

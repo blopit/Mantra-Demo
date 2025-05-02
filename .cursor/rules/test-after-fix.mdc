@@ -1,0 +1,82 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+description: "Rule to enforce adding or updating tests after fixing errors"
+alwaysApply: true
+
+# Test After Fix Rule
+
+## Purpose
+- Ensure test coverage for bug fixes
+- Prevent regression bugs
+- Document expected behavior
+- Validate fixes work as intended
+
+## Requirements
+1. After fixing any error or bug:
+   - Add new test case(s) that would have caught the error
+   - Update existing tests if they didn't catch the error
+   - Document the test case with clear description of what failed
+   - Include both positive and negative test cases
+
+2. Test Types to Consider:
+   - Unit tests for specific functions/components
+   - Integration tests for workflows
+   - End-to-end tests for full features
+   - Edge case tests that triggered the error
+
+3. Test Structure:
+   - Describe the original error scenario
+   - Test the fix works
+   - Test edge cases
+   - Test error handling
+   - Test related functionality
+
+4. Documentation:
+   - Comment why the test was added
+   - Reference the original error
+   - Explain what the test verifies
+
+## Implementation
+For this workflow creation error:
+1. Add unit tests for:
+   - Workflow creation with valid data
+   - Workflow creation with missing fields
+   - Workflow creation with invalid workflow_json
+   - Error handling scenarios
+
+2. Add integration tests for:
+   - Full workflow creation process
+   - Form validation
+   - API interaction
+   - Error message display
+
+3. Add end-to-end tests for:
+   - User workflow creation journey
+   - Form submission
+   - Success/error notifications
+
+## Validation
+- Run all tests after adding new ones
+- Ensure new tests fail without the fix
+- Verify tests pass with the fix
+- Check test coverage
+
+## Example Test Structure
+```typescript
+describe('WorkflowCreator', () => {
+  describe('error cases', () => {
+    it('should handle missing required fields')
+    it('should handle invalid workflow JSON')
+    it('should display error messages')
+  })
+  
+  describe('success cases', () => {
+    it('should create workflow with valid data')
+    it('should show success message')
+    it('should reset form after success')
+  })
+})
+```

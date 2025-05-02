@@ -14,7 +14,7 @@ from typing import List, Dict, Any, Optional, Union
 from fastapi import Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 from sqlalchemy import select, and_
 from sqlalchemy.orm import selectinload
 from datetime import datetime
@@ -59,7 +59,23 @@ class MantraService:
             if not workflow_json or not isinstance(workflow_json, dict) or "nodes" not in workflow_json:
                 raise ValueError("Invalid workflow JSON: must contain 'nodes' field")
             
-            self.n8n_service.parse_workflow(workflow_json)
+            # Check if workflow contains Google service nodes
+            contains_google_nodes = False
+            google_service_types = ['gmail', 'googlecalendar', 'googledrive', 'googlesheets']
+            
+            for node in workflow_json.get('nodes', []):
+                if node.get('type', '').lower() in google_service_types:
+                    contains_google_nodes = True
+                    break
+            
+            # Transform workflow if it contains Google service nodes
+            if contains_google_nodes:
+                logger.info("Workflow contains Google service nodes. Applying transformation.")
+                transformer = GoogleWorkflowTransformer()
+                workflow_json = transformer.transform_workflow(workflow_json)
+            
+            # Now validate the (potentially transformed) workflow
+            self.n8n_service._validate_workflow_structure(workflow_json)
             
             # Create new mantra
             mantra = Mantra(
@@ -89,28 +105,34 @@ class MantraService:
     
     async def get_mantras(self, skip: int = 0, limit: int = 100) -> List[Mantra]:
         """
-        Get all available mantras
+        Get a list of all active mantras
         
         Args:
-            skip: Number of mantras to skip
-            limit: Maximum number of mantras to return
+            skip: Number of records to skip
+            limit: Maximum number of records to return
             
         Returns:
             List of Mantra objects
         """
         try:
-            result = await self.db_session.execute(
+            # Build query
+            stmt = (
                 select(Mantra)
                 .where(Mantra.is_active == True)
-                .offset(skip)
                 .limit(limit)
+                .offset(skip)
             )
-            return result.scalars().all()
-        except SQLAlchemyError as e:
-            logger.error(f"Database error in get_mantras: {e}")
+            logger.debug(f"Executing query: {stmt}")
+            
+            # Execute query and fetch results
+            result = await self.db_session.execute(stmt)
+            mantras = result.scalars().all()
+            return mantras
+        except Exception as e:
+            logger.error(f"Error in get_mantras: {str(e)}, {type(e)}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Database error occurred"
+                detail="Error fetching mantras"
             )
     
     async def get_mantra(self, mantra_id: UUID) -> Mantra:
@@ -127,7 +149,7 @@ class MantraService:
             result = await self.db_session.execute(
                 select(Mantra).where(Mantra.id == mantra_id)
             )
-            mantra = result.scalar_one_or_none()
+            mantra = await result.scalar_one_or_none()
             if not mantra:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
@@ -142,130 +164,226 @@ class MantraService:
             )
     
     async def install_mantra(self, mantra_id: str, user_id: str, config: Optional[Dict[str, Any]] = None) -> MantraInstallation:
-        """Install a mantra for a user
+        """Install a mantra for a user.
         
         Args:
             mantra_id: The ID of the mantra to install
             user_id: The ID of the user installing the mantra
             config: Optional configuration for the installation
-            
+        
         Returns:
             The created MantraInstallation object
+        
+        Raises:
+            HTTPException: For various error conditions:
+                - 404: Mantra not found
+                - 400: Already installed, invalid workflow format
+                - 500: Internal server error
         """
+        n8n_workflow_id = None
+
         try:
-            # Get the mantra
-            result = await self.db_session.execute(
-                select(Mantra).where(Mantra.id == mantra_id)
-            )
-            mantra = result.scalar_one_or_none()
-            if not mantra:
-                raise MantraNotFoundError(f"Mantra {mantra_id} not found")
-                
-            # Validate workflow format
-            if not mantra.workflow_json or "nodes" not in mantra.workflow_json:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Invalid workflow format: must contain 'nodes' field"
-                )
-                
-            # Check if already installed
-            result = await self.db_session.execute(
-                select(MantraInstallation)
-                .where(
+            # Start transaction
+            async with self.db_session.begin():
+                logger.info(f"Starting mantra installation process for mantra_id={mantra_id}, user_id={user_id}")
+
+                # Get the mantra
+                logger.debug(f"Executing query to fetch mantra with ID: {mantra_id}")
+                stmt = select(Mantra).where(Mantra.id == mantra_id)
+                result = await self.db_session.execute(stmt)
+                mantra = result.scalar_one_or_none()
+
+                if not mantra:
+                    logger.error(f"Mantra {mantra_id} not found")
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"Mantra {mantra_id} not found"
+                    )
+                logger.debug(f"Successfully fetched mantra: {mantra.id}")
+
+                # Validate workflow format
+                logger.debug(f"Validating workflow format for mantra {mantra_id}")
+                workflow_data = mantra.workflow_json
+                if not workflow_data or not isinstance(workflow_data, dict) or "nodes" not in workflow_data:
+                    logger.error(f"Invalid workflow format for mantra {mantra_id}: missing 'nodes' field")
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Invalid workflow format: must contain 'nodes' field"
+                    )
+
+                # Validate nodes
+                if not isinstance(workflow_data["nodes"], list):
+                    logger.error(f"Invalid workflow format for mantra {mantra_id}: 'nodes' must be an array")
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Invalid workflow format: 'nodes' must be an array"
+                    )
+
+                for node in workflow_data["nodes"]:
+                    if not isinstance(node, dict) or "type" not in node:
+                        logger.error(f"Invalid node format in mantra {mantra_id}: missing required fields")
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Node missing required fields: must contain 'type'"
+                        )
+
+                logger.debug(f"Workflow format validation successful for mantra {mantra_id}")
+
+                # Check if already installed
+                logger.debug(f"Checking if mantra {mantra_id} is already installed for user {user_id}")
+                stmt = select(MantraInstallation).where(
                     and_(
                         MantraInstallation.mantra_id == mantra_id,
                         MantraInstallation.user_id == user_id
                     )
                 )
-            )
-            existing = result.scalar_one_or_none()
-            if existing:
-                raise MantraAlreadyInstalledError(f"Mantra {mantra_id} is already installed for user {user_id}")
+                result = await self.db_session.execute(stmt)
+                existing_installation = result.scalar_one_or_none()
+
+                if existing_installation:
+                    logger.error(f"Mantra {mantra_id} is already installed for user {user_id}")
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Mantra {mantra_id} is already installed for user {user_id}"
+                    )
+
+                try:
+                    # Check if workflow contains Google service nodes and transform if needed
+                    contains_google_nodes = False
+                    google_service_types = ['gmail', 'googlecalendar', 'googledrive', 'googlesheets']
+                    
+                    for node in workflow_data.get('nodes', []):
+                        if node.get('type', '').lower() in google_service_types:
+                            contains_google_nodes = True
+                            break
+                    
+                    # Transform workflow if it contains Google service nodes
+                    if contains_google_nodes:
+                        logger.info("Workflow contains Google service nodes. Applying transformation.")
+                        transformer = GoogleWorkflowTransformer()
+                        workflow_data = transformer.transform_workflow(workflow_data)
                 
-            # Create workflow in n8n
-            try:
-                n8n_result = await self.n8n_service.create_workflow(mantra.workflow_json)
-                # Handle both integer and dictionary response formats
-                workflow_id = n8n_result["id"] if isinstance(n8n_result, dict) else n8n_result
-                
-                # Activate the workflow
-                await self.n8n_service.activate_workflow(workflow_id)
-            except Exception as e:
-                logger.error(f"Error creating n8n workflow: {str(e)}")
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Error creating n8n workflow: {str(e)}"
-                )
-                
-            # Create installation
-            installation = MantraInstallation(
-                mantra_id=mantra_id,
-                user_id=user_id,
-                status="active",
-                config=config,
-                n8n_workflow_id=workflow_id
-            )
-            self.db_session.add(installation)
-            await self.db_session.commit()
-            await self.db_session.refresh(installation)
-            
-            return installation
-            
-        except (MantraNotFoundError, MantraAlreadyInstalledError, HTTPException):
-            raise
+                    # Create workflow in n8n
+                    logger.info(f"Creating n8n workflow for mantra {mantra_id}")
+                    logger.debug(f"Workflow JSON content: {workflow_data}")
+
+                    n8n_result = await self.n8n_service.create_workflow(workflow_data)
+                    logger.debug(f"n8n workflow creation result: {n8n_result}")
+
+                    # Handle both integer and dictionary response formats
+                    n8n_workflow_id = n8n_result["id"] if isinstance(n8n_result, dict) else n8n_result
+                    logger.info(f"Created n8n workflow with ID: {n8n_workflow_id}")
+
+                    # Activate the workflow
+                    logger.info(f"Activating n8n workflow {n8n_workflow_id}")
+                    await self.n8n_service.activate_workflow(n8n_workflow_id)
+                    logger.info(f"Successfully activated n8n workflow {n8n_workflow_id}")
+
+                    # Create installation record
+                    installation = MantraInstallation(
+                        mantra_id=mantra_id,
+                        user_id=user_id,
+                        config=config or {},
+                        n8n_workflow_id=n8n_workflow_id,
+                        status="active"
+                    )
+
+                    self.db_session.add(installation)
+                    await self.db_session.flush()  # Flush to get the ID but don't commit yet
+
+                    logger.info(f"Successfully created installation record with ID: {installation.id}")
+                    return installation
+
+                except HTTPException as e:
+                    logger.error(f"HTTP error during workflow creation or installation: {str(e)}")
+                    if n8n_workflow_id:
+                        try:
+                            # Try to clean up the n8n workflow if it was created
+                            logger.info(f"Attempting to clean up n8n workflow {n8n_workflow_id}")
+                            await self.n8n_service.delete_workflow(n8n_workflow_id)
+                            logger.info(f"Successfully cleaned up n8n workflow {n8n_workflow_id}")
+                        except Exception as cleanup_error:
+                            logger.error(f"Failed to clean up n8n workflow {n8n_workflow_id}: {str(cleanup_error)}")
+                    raise  # Re-raise the original HTTP exception
+
+                except Exception as e:
+                    logger.error(f"Error during workflow creation or installation: {str(e)}")
+                    if n8n_workflow_id:
+                        try:
+                            # Try to clean up the n8n workflow if it was created
+                            logger.info(f"Attempting to clean up n8n workflow {n8n_workflow_id}")
+                            await self.n8n_service.delete_workflow(n8n_workflow_id)
+                            logger.info(f"Successfully cleaned up n8n workflow {n8n_workflow_id}")
+                        except Exception as cleanup_error:
+                            logger.error(f"Failed to clean up n8n workflow {n8n_workflow_id}: {str(cleanup_error)}")
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail=str(e)
+                    )
+
+        except HTTPException:
+            raise  # Re-raise HTTP exceptions as is
         except Exception as e:
-            logger.error(f"Error installing mantra: {str(e)}")
+            logger.error(f"Unexpected error during mantra installation: {str(e)}")
             raise HTTPException(
-                status_code=500,
-                detail=f"Error installing mantra: {str(e)}"
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Internal server error"
             )
     
-    async def uninstall_mantra(self, installation_id: UUID, user_id: str) -> None:
+    async def uninstall_mantra(self, installation_id: str, user_id: str) -> None:
         """Uninstall a mantra for a user.
-    
+        
         Args:
-            installation_id: The ID of the installation to uninstall
+            installation_id: The ID of the installation to remove
             user_id: The ID of the user uninstalling the mantra
-    
+        
         Raises:
-            MantraNotFoundError: If the mantra installation doesn't exist
-            HTTPException: If there's an error deleting the workflow
+            HTTPException: For various error conditions:
+                - 404: Installation not found
+                - 403: Not installed by user
+                - 500: Internal server error
         """
         try:
-            # Find installation
-            result = await self.db_session.execute(
-                select(MantraInstallation).where(
-                    MantraInstallation.id == installation_id,
-                    MantraInstallation.user_id == user_id
-                )
-            )
-            installation = result.scalar_one_or_none()
-            if not installation:
-                raise MantraNotFoundError(
-                    f"No installation found for id {installation_id} and user {user_id}"
-                )
-            
-            # Delete n8n workflow if it exists
-            if installation.n8n_workflow_id:
-                try:
-                    await self.n8n_service.delete_workflow(installation.n8n_workflow_id)
-                except Exception as e:
-                    logger.error(f"Error deleting n8n workflow {installation.n8n_workflow_id}: {str(e)}")
+            async with self.db_session.begin():
+                # Get the installation
+                stmt = select(MantraInstallation).where(MantraInstallation.id == installation_id)
+                result = await self.db_session.execute(stmt)
+                installation = result.scalar_one_or_none()
+
+                if not installation:
                     raise HTTPException(
-                        status_code=500,
-                        detail=f"Failed to delete n8n workflow: {str(e)}"
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"Installation {installation_id} not found"
                     )
-                
-            # Delete the installation
-            await self.db_session.delete(installation)
-            await self.db_session.commit()
-        except (MantraNotFoundError, HTTPException):
-            raise
+
+                if installation.user_id != user_id:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail=f"Installation {installation_id} not installed by user {user_id}"
+                    )
+
+                try:
+                    # Delete the n8n workflow
+                    if installation.n8n_workflow_id:
+                        await self.n8n_service.delete_workflow(installation.n8n_workflow_id)
+
+                    # Delete the installation record
+                    await self.db_session.delete(installation)
+
+                except Exception as e:
+                    logger.error(f"Error during workflow deletion: {str(e)}")
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail=str(e)
+                    )
+
+        except HTTPException:
+            raise  # Re-raise HTTP exceptions as is
         except Exception as e:
-            logger.error(f"Error uninstalling mantra: {str(e)}")
+            logger.error(f"Unexpected error during mantra uninstallation: {str(e)}")
             raise HTTPException(
-                status_code=500,
-                detail=f"Error uninstalling mantra: {str(e)}"
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Internal server error"
             )
     
     async def update_mantra_status(self, installation_id: str, status: str) -> MantraInstallation:
@@ -283,7 +401,7 @@ class MantraService:
             result = await self.db_session.execute(
                 select(MantraInstallation).where(MantraInstallation.id == installation_id)
             )
-            installation = result.scalar_one_or_none()
+            installation = await result.scalar_one_or_none()
             if not installation:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
@@ -305,34 +423,34 @@ class MantraService:
                 detail="Database error occurred"
             )
     
-    async def get_user_installations(self, user_id: str) -> List[Dict]:
+    async def get_user_installations(self, user_id: str) -> List[MantraInstallation]:
         """
-        Get all mantras for a user
+        Get all mantra installations for a user
         
         Args:
             user_id: The ID of the user
             
         Returns:
-            A list of mantras
+            List of MantraInstallation objects
         """
-        result = await self.db_session.execute(
-            select(MantraInstallation)
-            .options(selectinload(MantraInstallation.mantra))
-            .where(MantraInstallation.user_id == user_id)
-        )
-        installations = result.scalars().all()
-        
-        return [
-            {
-                "id": str(inst.id),
-                "mantra_id": str(inst.mantra_id),
-                "mantra_name": inst.mantra.name if inst.mantra else None,
-                "status": inst.status,
-                "created_at": inst.created_at,
-                "n8n_workflow_id": inst.n8n_workflow_id
-            }
-            for inst in installations
-        ]
+        try:
+            # Build query
+            stmt = (
+                select(MantraInstallation)
+                .where(MantraInstallation.user_id == user_id)
+            )
+            logger.debug(f"Executing query: {stmt}")
+            
+            # Execute query and fetch results
+            result = await self.db_session.execute(stmt)
+            installations = result.scalars().all()
+            return installations
+        except Exception as e:
+            logger.error(f"Error in get_user_installations: {str(e)}, {type(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Error fetching user installations"
+            )
     
     async def get_installation(self, installation_id: str) -> Dict:
         """
