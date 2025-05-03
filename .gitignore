@@ -178,3 +178,10 @@ cython_debug/
 .cursor/user_profile/
 .cursor/user_profile/*
 !.cursor/user_profile/example.json
+
+# Playwright
+node_modules/
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/

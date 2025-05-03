@@ -70,18 +70,12 @@ async def index(request: Request):
     # Check if user is authenticated
     user = request.session.get("user")
 
-    # If user is authenticated and explicitly requesting root, redirect to accounts
-    if user and request.url.path == "/":
+    # If user is authenticated, redirect to accounts
+    if user:
         return RedirectResponse(url="/accounts", status_code=302)
 
-    # Otherwise show sign-in page
-    return templates.TemplateResponse(
-        "google_signin.html",
-        {
-            "request": request,
-            "google_client_id": os.getenv("GOOGLE_CLIENT_ID", "")
-        }
-    )
+    # If not authenticated, redirect to signin
+    return RedirectResponse(url="/signin", status_code=302)
 
 @app.get("/signin", response_class=HTMLResponse)
 async def signin(

@@ -1,0 +1,48 @@
+description: "Always verify changes by running tests and checking functionality"
+
+# Verify Changes Rule
+
+## Purpose
+- Ensure all code changes are tested
+- Verify functionality after modifications
+- Catch issues early in development
+
+## Requirements
+1. Run relevant tests after code changes
+2. Check if changes work as expected
+3. Verify edge cases and error handling
+4. Document test results
+
+## Test Verification Steps
+1. Run unit tests for modified components
+2. Run integration tests if components interact
+3. Check test coverage for new code
+4. Verify error handling scenarios
+
+## Examples
+
+### Good Practice
+```python
+# After modifying service code
+python -m pytest tests/integration/test_service.py -v
+
+# Check test results and coverage
+```
+
+### Bad Practice
+```python
+# Making changes without testing
+# Assuming it works without verification
+```
+
+## Documentation
+- Document test results
+- Note any failing tests
+- Record edge cases tested
+- Track test coverage
+
+## Error Handling
+1. If tests fail, investigate root cause
+2. Fix issues before proceeding
+3. Re-run tests to confirm fixes
+4. Document any test-related issues

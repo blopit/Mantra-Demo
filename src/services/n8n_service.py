@@ -8,7 +8,7 @@ This module handles the interaction with n8n API for:
 """
 
 import logging
-from typing import Dict, Any, Optional, Union
+from typing import Dict, Any, Optional, Union, List
 import httpx
 from fastapi import HTTPException
 import aiohttp
@@ -17,6 +17,7 @@ import os
 from jsonschema import validate, ValidationError
 import asyncio
 from fastapi import status
+import urllib.parse
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +98,8 @@ class N8nService:
             api_key: The API key for authentication
         """
         self.api_url = api_url.rstrip('/')
+        # Extract base URL for health checks (without /api/v1)
+        self.base_url = self.api_url.rsplit('/api/v1', 1)[0]
         self.api_key = api_key
         self.headers = {
             'X-N8N-API-KEY': api_key,
@@ -105,7 +108,203 @@ class N8nService:
         self.timeout = float(os.getenv("N8N_API_TIMEOUT", "30.0"))
         self.max_retries = int(os.getenv("N8N_MAX_RETRIES", "3"))
         self.retry_delay = float(os.getenv("N8N_RETRY_DELAY", "1.0"))
-    
+        
+        # Validate environment on initialization
+        self.validate_environment()
+
+    def validate_environment(self) -> None:
+        """Validate that all required environment variables are set.
+        
+        Raises:
+            ValueError: If any required environment variables are missing
+        """
+        if not self.api_url or self.api_url.isspace():
+            raise ValueError("N8N_API_URL is not configured")
+        if not self.api_key or self.api_key.isspace():
+            raise ValueError("N8N_API_KEY is not configured")
+        
+        # Log configuration (masking sensitive data)
+        parsed_url = urllib.parse.urlparse(self.api_url)
+        netloc_parts = parsed_url.netloc.split('@')
+        masked_netloc = netloc_parts[-1] if len(netloc_parts) > 1 else parsed_url.netloc
+        masked_url = parsed_url._replace(netloc=masked_netloc).geturl()
+        
+        logger.info("N8N Service Configuration:", extra={
+            "api_url": masked_url,
+            "timeout": self.timeout,
+            "max_retries": self.max_retries,
+            "retry_delay": self.retry_delay
+        })
+
+    async def check_connection(self) -> Dict[str, Any]:
+        """Check connection to n8n service.
+        
+        Returns:
+            Dict containing connection status and details
+            
+        Raises:
+            HTTPException: If connection check fails
+        """
+        # Use base URL for health check
+        url = f"{self.base_url}/healthz"
+        
+        logger.info("Checking n8n service connection", extra={
+            "url": url,
+            "timeout": self.timeout
+        })
+        
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            try:
+                response = await client.get(url, headers=self.headers)
+                
+                # Handle 401 Unauthorized immediately without retrying
+                if response.status_code == 401:
+                    error_msg = "Unauthorized access to n8n service. Check API key configuration."
+                    logger.error(error_msg)
+                    raise HTTPException(
+                        status_code=401,
+                        detail=error_msg
+                    )
+                
+                # For other status codes, raise_for_status and handle in the exception block
+                response.raise_for_status()
+                
+                # For health check, a 200 status code is sufficient
+                logger.info("Successfully connected to n8n service")
+                return {
+                    "is_connected": True,
+                    "status": "ok",
+                    "response_time_ms": response.elapsed.total_seconds() * 1000
+                }
+                
+            except httpx.HTTPStatusError as e:
+                # Handle 401 Unauthorized immediately without retrying
+                if e.response.status_code == 401:
+                    error_msg = "Unauthorized access to n8n service. Check API key configuration."
+                    logger.error(error_msg)
+                    raise HTTPException(
+                        status_code=401,
+                        detail=error_msg
+                    ) from e
+                
+                # For other HTTP errors, retry
+                logger.error(f"HTTP error during connection check: {str(e)}", extra={
+                    "status_code": e.response.status_code,
+                    "response": e.response.text
+                })
+                
+                # Retry with exponential backoff
+                for attempt in range(1, self.max_retries):
+                    try:
+                        await asyncio.sleep(self.retry_delay * (2 ** (attempt - 1)))
+                        response = await client.get(url, headers=self.headers)
+                        response.raise_for_status()
+                        
+                        logger.info("Successfully connected to n8n service after retry")
+                        return {
+                            "is_connected": True,
+                            "status": "ok",
+                            "response_time_ms": response.elapsed.total_seconds() * 1000
+                        }
+                    except httpx.HTTPStatusError as retry_e:
+                        if retry_e.response.status_code == 401:
+                            error_msg = "Unauthorized access to n8n service. Check API key configuration."
+                            logger.error(error_msg)
+                            raise HTTPException(
+                                status_code=401,
+                                detail=error_msg
+                            ) from retry_e
+                        continue
+                    except Exception:
+                        continue
+                
+                # If we get here, all retries failed
+                raise HTTPException(
+                    status_code=e.response.status_code,
+                    detail=f"n8n service returned error: {e.response.text}"
+                ) from e
+                
+            except httpx.ConnectError as e:
+                # Retry with exponential backoff
+                for attempt in range(1, self.max_retries):
+                    try:
+                        await asyncio.sleep(self.retry_delay * (2 ** (attempt - 1)))
+                        response = await client.get(url, headers=self.headers)
+                        response.raise_for_status()
+                        
+                        logger.info("Successfully connected to n8n service after retry")
+                        return {
+                            "is_connected": True,
+                            "status": "ok",
+                            "response_time_ms": response.elapsed.total_seconds() * 1000
+                        }
+                    except Exception:
+                        continue
+                
+                # If we get here, all retries failed
+                raise HTTPException(
+                    status_code=503,
+                    detail=f"Failed to connect to n8n service after {self.max_retries} attempts: {str(e)}"
+                ) from e
+                
+            except httpx.TimeoutException as e:
+                # Retry with exponential backoff
+                for attempt in range(1, self.max_retries):
+                    try:
+                        await asyncio.sleep(self.retry_delay * (2 ** (attempt - 1)))
+                        response = await client.get(url, headers=self.headers)
+                        response.raise_for_status()
+                        
+                        logger.info("Successfully connected to n8n service after retry")
+                        return {
+                            "is_connected": True,
+                            "status": "ok",
+                            "response_time_ms": response.elapsed.total_seconds() * 1000
+                        }
+                    except Exception:
+                        continue
+                
+                # If we get here, all retries failed
+                raise HTTPException(
+                    status_code=503,
+                    detail=f"Failed to connect to n8n service after {self.max_retries} attempts: {str(e)}"
+                ) from e
+                
+            except Exception as e:
+                error_msg = str(e)
+                logger.error(f"Unexpected error during connection check: {error_msg}")
+                
+                # Check for unauthorized errors in the error message
+                if "401" in error_msg or "Unauthorized" in error_msg:
+                    error_msg = "Unauthorized access to n8n service. Check API key configuration."
+                    logger.error(error_msg)
+                    raise HTTPException(
+                        status_code=401,
+                        detail=error_msg
+                    ) from e
+                
+                # Retry with exponential backoff
+                for attempt in range(1, self.max_retries):
+                    try:
+                        await asyncio.sleep(self.retry_delay * (2 ** (attempt - 1)))
+                        response = await client.get(url, headers=self.headers)
+                        response.raise_for_status()
+                        
+                        logger.info("Successfully connected to n8n service after retry")
+                        return {
+                            "is_connected": True,
+                            "status": "ok",
+                            "response_time_ms": response.elapsed.total_seconds() * 1000
+                        }
+                    except Exception:
+                        continue
+                
+                # If we get here, all retries failed
+                raise HTTPException(
+                    status_code=503,
+                    detail=f"Failed to connect to n8n service after {self.max_retries} attempts: {error_msg}"
+                ) from e
+
     def parse_workflow(self, workflow_json: Dict[str, Any]) -> Dict[str, Any]:
         """Parse and validate a workflow JSON.
         
@@ -222,139 +421,122 @@ class N8nService:
         # Deep copy to avoid modifying the original
         workflow = json.loads(json.dumps(workflow_json))
         
-        # Add required n8n fields with defaults
+        # Required fields for n8n workflow
         workflow.setdefault('name', 'Imported Workflow')
-        workflow.setdefault('active', False)
+        workflow.setdefault('nodes', [])
+        workflow.setdefault('connections', {})
         workflow.setdefault('settings', {})
-        workflow.setdefault('staticData', None)
-        workflow.setdefault('pinData', {})
-        workflow.setdefault('tags', [])
-        workflow.setdefault('versionId', 1)
         
-        # Add default settings if not present
-        workflow['settings'].setdefault('saveExecutionProgress', True)
-        workflow['settings'].setdefault('saveManualExecutions', True)
-        workflow['settings'].setdefault('callerPolicy', 'workflowsFromSameOwner')
+        # Ensure each node has required fields
+        for node in workflow.get('nodes', []):
+            node.setdefault('parameters', {})
+            node.setdefault('typeVersion', 1)
+            node.setdefault('position', [0, 0])
+            
+            # Ensure node type follows n8n format
+            if not node.get('type', '').startswith('n8n-nodes-base.'):
+                node_type = node.get('type', '')
+                if node_type:
+                    node['type'] = f"n8n-nodes-base.{node_type}"
         
         return workflow
     
-    async def create_workflow(self, workflow_json: Dict[str, Any]) -> Union[Dict[str, Any], int]:
+    async def list_workflows(self) -> List[Dict[str, Any]]:
+        """List all workflows in n8n.
+        
+        Returns:
+            List of workflow objects
+            
+        Raises:
+            HTTPException: If there is an error listing workflows
+        """
+        # First check connection
+        await self.check_connection()
+        
+        url = f"{self.api_url}/workflows"
+        
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            for attempt in range(self.max_retries):
+                try:
+                    response = await client.get(
+                        url,
+                        headers=self.headers
+                    )
+                    response.raise_for_status()
+                    workflows = response.json()
+                    logger.info(f"Successfully retrieved {len(workflows)} workflows")
+                    return workflows
+                except httpx.RequestError as e:
+                    logger.warning(f"HTTP Request Error on attempt {attempt + 1}: {type(e).__name__} - {str(e)}")
+                    if attempt == self.max_retries - 1:
+                        logger.error(f"HTTP request error listing n8n workflows after {self.max_retries} attempts: {type(e).__name__} - {str(e)}")
+                        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"HTTP request error communicating with n8n: {str(e)}")
+                except httpx.HTTPStatusError as e:
+                    logger.warning(f"HTTP Status Error on attempt {attempt + 1}: Status {e.response.status_code}")
+                    logger.warning(f"Response body: {e.response.text}")
+                    if attempt == self.max_retries - 1:
+                        logger.error(f"HTTP status error listing n8n workflows after {self.max_retries} attempts: Status {e.response.status_code}")
+                        raise HTTPException(status_code=e.response.status_code, detail=f"n8n API error: {e.response.text}")
+                await asyncio.sleep(self.retry_delay * (2 ** attempt))
+
+    async def create_workflow(self, workflow_json: Dict[str, Any]) -> Dict[str, Any]:
         """Create a new workflow in n8n.
         
         Args:
             workflow_json: The workflow definition
             
         Returns:
-            The ID of the created workflow or workflow details
+            The created workflow details
             
         Raises:
-            HTTPException: If workflow creation fails
+            HTTPException: If there is an error creating the workflow
         """
+        # First check connection
+        await self.check_connection()
+        
         try:
-            # Validate workflow structure
-            try:
-                self._validate_workflow_structure(workflow_json)
-            except ValueError as validation_error:
-                # Provide more detailed error for validation issues
-                logger.error(f"Workflow validation error: {str(validation_error)}")
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Invalid workflow format: {str(validation_error)}"
-                )
-            
-            # Prepare workflow for n8n
             prepared_workflow = self._prepare_workflow_for_n8n(workflow_json)
-            
-            # Log request details
-            logger.info("Creating n8n workflow")
-            logger.debug(f"Request URL: {self.api_url}/workflows")
-            logger.debug(f"Request headers: {json.dumps(self.headers, indent=2)}")
-            logger.debug(f"Request payload: {json.dumps(prepared_workflow, indent=2)}")
-            
-            retry_count = 0
-            while retry_count < self.max_retries:
-                try:
-                    async with httpx.AsyncClient() as client:
-                        response = await client.post(
-                            f"{self.api_url}/workflows",
-                            headers=self.headers,
-                            json=prepared_workflow,
-                            timeout=self.timeout
-                        )
-                        
-                        # Log response details
-                        logger.debug(f"Response status: {response.status_code}")
-                        logger.debug(f"Response headers: {json.dumps(dict(response.headers), indent=2)}")
-                        
-                        if response.status_code == 400:
-                            error_detail = None
-                            try:
-                                error_json = response.json()
-                                if isinstance(error_json, dict):
-                                    error_detail = error_json.get('message', error_json)
-                                logger.error(f"N8N API error response: {json.dumps(error_json, indent=2)}")
-                            except:
-                                error_detail = response.text
-                                logger.error(f"N8N API error response (text): {error_detail}")
-                            
-                            raise HTTPException(
-                                status_code=400,
-                                detail=f"Invalid workflow format: {error_detail}"
-                            )
-                        
-                        response.raise_for_status()
-                        result = response.json()
-                        
-                        if not isinstance(result, dict) or 'id' not in result:
-                            raise ValueError("Invalid response from n8n API: missing workflow ID")
-                        
-                        logger.info(f"Successfully created n8n workflow with ID: {result['id']}")
-                        logger.debug(f"Workflow creation response: {json.dumps(result, indent=2)}")
-                        return result
-                        
-                except httpx.HTTPError as e:
-                    if retry_count + 1 < self.max_retries:
-                        retry_count += 1
-                        logger.warning(f"Retrying workflow creation after error (attempt {retry_count}): {str(e)}")
-                        await asyncio.sleep(self.retry_delay)
-                    else:
-                        raise
-                        
-        except httpx.HTTPError as e:
-            logger.error(f"HTTP error creating n8n workflow: {str(e)}")
-            if isinstance(e, httpx.HTTPStatusError):
-                status_code = e.response.status_code
-                error_detail = None
-                try:
-                    error_json = e.response.json()
-                    if isinstance(error_json, dict):
-                        error_detail = error_json.get('message', error_json)
-                    logger.error(f"N8N API error response: {json.dumps(error_json, indent=2)}")
-                except:
-                    error_detail = e.response.text
-                    logger.error(f"N8N API error response (text): {error_detail}")
-                
-                raise HTTPException(
-                    status_code=status_code,
-                    detail=f"Failed to create n8n workflow: {error_detail}"
-                )
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to create n8n workflow: {str(e)}"
-            )
+            logger.info(f"Creating n8n workflow with {len(prepared_workflow.get('nodes', []))} nodes")
         except ValueError as e:
-            logger.error(f"Validation error in workflow JSON: {str(e)}")
-            raise HTTPException(
-                status_code=400,
-                detail=str(e)
-            )
-        except Exception as e:
-            logger.error(f"Unexpected error creating n8n workflow: {str(e)}")
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to create n8n workflow: {str(e)}"
-            )
-    
+            logger.error(f"Workflow preparation failed: {str(e)}")
+            raise HTTPException(status_code=400, detail=f"Invalid workflow format: {str(e)}")
+        
+        url = f"{self.api_url}/workflows"
+        
+        # Mask API key in headers for logging
+        logged_headers = self.headers.copy()
+        if 'X-N8N-API-KEY' in logged_headers:
+             logged_headers['X-N8N-API-KEY'] = '***MASKED***'
+
+        logger.debug(f"Attempting to create n8n workflow at URL: {url}")
+        logger.debug(f"Request Headers: {json.dumps(logged_headers)}")
+        logger.debug(f"Request Body: {json.dumps(prepared_workflow, indent=2)}")
+
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            for attempt in range(self.max_retries):
+                try:
+                    response = await client.post(
+                        url,
+                        json=prepared_workflow,
+                        headers=self.headers
+                    )
+                    response.raise_for_status()
+                    created_workflow = response.json()
+                    logger.info(f"Successfully created n8n workflow with ID: {created_workflow.get('id')}")
+                    return created_workflow
+                except httpx.RequestError as e:
+                    logger.warning(f"HTTP Request Error on attempt {attempt + 1}: {type(e).__name__} - {str(e)}")
+                    if attempt == self.max_retries - 1:
+                        logger.error(f"HTTP request error creating n8n workflow after {self.max_retries} attempts: {type(e).__name__} - {str(e)}")
+                        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"HTTP request error communicating with n8n: {str(e)}")
+                except httpx.HTTPStatusError as e:
+                    logger.warning(f"HTTP Status Error on attempt {attempt + 1}: Status {e.response.status_code}")
+                    logger.warning(f"Response body: {e.response.text}")
+                    if attempt == self.max_retries - 1:
+                        logger.error(f"HTTP status error creating n8n workflow after {self.max_retries} attempts: Status {e.response.status_code}")
+                        raise HTTPException(status_code=e.response.status_code, detail=f"n8n API error: {e.response.text}")
+                await asyncio.sleep(self.retry_delay * (2 ** attempt))
+
     async def activate_workflow(self, workflow_id: int) -> None:
         """Activate a workflow in n8n.
         

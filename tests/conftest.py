@@ -74,17 +74,22 @@ sqlite.base.ischema_names['uuid'] = SQLiteUUID
 os.environ["TESTING"] = "true"
 
 # Set up test database
-TEST_DATABASE_URL = "sqlite+aiosqlite:///./test.db"
+TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"  # Use in-memory database for tests
 
 settings = Settings()
 
 engine = create_async_engine(
     TEST_DATABASE_URL,
     echo=True,
+    poolclass=StaticPool,  # Use static pool for in-memory database
+    connect_args={"check_same_thread": False}  # Allow multiple threads to use the same connection
 )
 
-async_session = sessionmaker(
-    engine, class_=AsyncSession, expire_on_commit=False
+async_session = async_sessionmaker(
+    engine,
+    class_=AsyncSession,
+    expire_on_commit=False,
+    autoflush=True
 )
 
 @pytest_asyncio.fixture(scope="session")
@@ -94,57 +99,56 @@ def event_loop():
     yield loop
     loop.close()
 
-@pytest_asyncio.fixture(scope="session")
+@pytest_asyncio.fixture(scope="function", autouse=True)
 async def setup_database():
-    """Set up the test database."""
+    """Set up the test database.
+    
+    This fixture:
+    1. Creates all tables before each test
+    2. Provides the test with a clean database
+    3. Drops all tables after the test
+    """
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
+    
     yield
+    
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
 
 @pytest_asyncio.fixture
-async def db_session(setup_database) -> AsyncSession:
-    """Create a fresh database session for a test."""
-    async with async_session() as session:
+async def db_session() -> AsyncSession:
+    """Create a fresh database session for a test.
+    
+    This fixture:
+    1. Creates a new session
+    2. Starts a transaction
+    3. Yields the session
+    4. Rolls back the transaction
+    5. Closes the session
+    """
+    session = async_session()
+    
+    try:
         yield session
-        await session.rollback()
+    finally:
         await session.close()
 
-@pytest.fixture
-def test_app() -> FastAPI:
-    """Create a new test application instance."""
-    # Create a new FastAPI instance
-    app = FastAPI()
-    
-    # Add CORS middleware
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"]
-    )
-    
-    # Add session middleware
-    app.add_middleware(
-        SessionMiddleware,
-        secret_key="test_secret_key",
-        session_cookie="session"
-    )
-    
-    # Include routers
-    app.include_router(google_auth_router)
-    app.include_router(mantra_router)
-    
-    return app
+def override_get_db(db_session: AsyncSession):
+    """Create a callable dependency override for get_db."""
+    async def _get_test_db():
+        try:
+            yield db_session
+        finally:
+            pass  # Don't close the session here, it's handled by the fixture
+    return _get_test_db
 
 @pytest.fixture
-def client(test_app, test_user, db_session, mock_n8n_service) -> TestClient:
-    """Create a test client with authentication."""
+def test_app(test_user, db_session, mock_n8n_service) -> FastAPI:
+    """Create a test application with authentication."""
     # Override the database dependency
-    test_app.dependency_overrides[get_db] = override_get_db(db_session)
+    main_app.dependency_overrides[get_db] = override_get_db(db_session)
     
     # Override the test session dependency
     def override_test_session():
@@ -160,24 +164,15 @@ def client(test_app, test_user, db_session, mock_n8n_service) -> TestClient:
     def override_get_n8n_service():
         return mock_n8n_service
     
-    test_app.dependency_overrides[get_test_session] = override_test_session
-    test_app.dependency_overrides[get_n8n_service] = override_get_n8n_service
+    main_app.dependency_overrides[get_test_session] = override_test_session
+    main_app.dependency_overrides[get_n8n_service] = override_get_n8n_service
     
-    # Create test client with base_url to ensure cookies are properly handled
-    client = TestClient(test_app, base_url="http://testserver")
-    
-    return client
+    return main_app
 
 @pytest.fixture
-def test_settings() -> Settings:
-    """Get test settings."""
-    return settings
-
-def override_get_db(db_session):
-    """Create a callable dependency override for get_db."""
-    async def _get_test_db():
-        yield db_session
-    return _get_test_db
+def client(test_app) -> TestClient:
+    """Create a test client."""
+    return TestClient(test_app, base_url="http://testserver")
 
 @pytest_asyncio.fixture
 async def test_user(db_session):
@@ -193,6 +188,11 @@ async def test_user(db_session):
     await db_session.commit()
     await db_session.refresh(user)
     return user
+
+@pytest.fixture
+def test_settings() -> Settings:
+    """Get test settings."""
+    return settings
 
 @pytest.fixture
 def mock_env_empty():

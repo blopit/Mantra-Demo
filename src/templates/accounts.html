@@ -541,7 +541,7 @@
                         <h3>${mantra.name}</h3>
                         <p>${mantra.description}</p>
                         <p style="margin-top: 10px;">
-                            <button class="btn btn-primary" onclick="installWorkflow('${mantra.id}')">Install Mantra</button>
+                            <button class="btn btn-primary" data-mantra-id="${mantra.id}" onclick="installWorkflow('${mantra.id}')">Install Mantra</button>
                         </p>
                     </div>
                 `).join('');
@@ -627,12 +627,19 @@
 
         // Install workflow
         async function installWorkflow(mantraId) {
+            const button = document.querySelector(`[data-mantra-id="${mantraId}"]`);
+            if (!button) {
+                console.error(`Button with data-mantra-id "${mantraId}" not found.`);
+                showNotification('error', 'Could not find the install button.');
+                return; // Exit if button not found
+            }
+
+            const originalText = button.textContent; // Store original text *after* checking button exists
+            button.disabled = true;
+            button.textContent = 'Installing...';
+
             try {
-                // Show loading state
-                const button = document.querySelector(`[data-mantra-id="${mantraId}"]`);
-                const originalText = button.textContent;
-                button.disabled = true;
-                button.textContent = 'Installing...';
+                // Show loading state (moved button update logic above try block)
                 
                 const response = await fetch(`/api/mantras/${mantraId}/install?user_id=${userProfile.id}`, {
                     method: 'POST',
@@ -682,11 +689,10 @@
                 console.error('Error installing mantra:', error);
                 showNotification('error', 'Failed to communicate with the server. Please check your connection and try again.');
             } finally {
-                // Reset button state
-                const button = document.querySelector(`[data-mantra-id="${mantraId}"]`);
-                if (button) {
+                // Reset button state - No need to query again, use the 'button' variable directly
+                if (button) { // Check still useful in case of unexpected errors before assignment
                     button.disabled = false;
-                    button.textContent = originalText;
+                    button.textContent = originalText; // Use the stored original text
                 }
             }
         }
