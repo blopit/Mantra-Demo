@@ -208,7 +208,7 @@ async def google_callback(
         if not user:
             logger.info(f"Creating new user with email: {user_info.get('email')}")
             user = Users(
-                id=str(uuid.uuid4()),
+                id=user_info["sub"],  # Use Google's sub as the user ID
                 email=user_info["email"],
                 name=user_info.get("name", ""),
                 profile_picture=user_info.get("picture", "")
@@ -239,7 +239,7 @@ async def google_callback(
             # Create new integration
             logger.info("Creating new Google integration")
             integration = GoogleIntegration(
-                id=str(uuid.uuid4()),
+                id=user_info["sub"],  # Use Google's sub as the integration ID
                 user_id=user.id,
                 google_account_id=user_info["sub"],
                 email=user_info["email"],
@@ -300,11 +300,16 @@ async def get_google_status(request: Request, db: Session = Depends(get_db)):
     try:
         # First check session (faster)
         user = request.session.get("user")
-        if user:
+        if user and user.get("id"):  # Make sure we have an ID
             return {
                 "connected": True,
                 "email": user["email"],
-                "user": user
+                "user": {
+                    "id": user["id"],
+                    "email": user["email"],
+                    "name": user.get("name", ""),
+                    "profile_picture": user.get("profile_picture", "")
+                }
             }
             
         # If not in session, check database
@@ -324,6 +329,7 @@ async def get_google_status(request: Request, db: Session = Depends(get_db)):
                     "connected": True,
                     "email": integration.email,
                     "user": {
+                        "id": user.id,
                         "email": user.email,
                         "name": user.name,
                         "profile_picture": user.profile_picture

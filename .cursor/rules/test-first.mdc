@@ -1,6 +1,6 @@
 ---
-description:
-globs:
+description: Rule enforcing test-first development practices
+globs: 
 alwaysApply: false
 ---
 # Test First Development

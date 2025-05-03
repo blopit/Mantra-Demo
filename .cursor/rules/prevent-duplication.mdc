@@ -1,6 +1,6 @@
 ---
 description: 
-globs: 
+globs: **/*.py,**/*.js
 alwaysApply: false
 ---
 description: Guidelines for preventing code duplication and maintaining DRY principles

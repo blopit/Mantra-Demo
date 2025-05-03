@@ -1,6 +1,6 @@
 ---
-description:
-globs:
+description: Rule for using and respecting user profiles
+globs: 
 alwaysApply: false
 ---
 description: "Rule for using and respecting user profiles"

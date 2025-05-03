@@ -1,0 +1,1 @@
+../tests/scripts/run-js-tests.sh

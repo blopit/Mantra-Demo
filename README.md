@@ -1,27 +1,62 @@
-# Mantra-Demo
+# Mantra Demo
 
-Demo example for Mantra Integration Manager with Google Sign-In
+<div align="center">
+  <h3>A FastAPI-based Integration Manager with Google Sign-In</h3>
+</div>
 
-## Overview
+## 📋 Overview
 
-This application demonstrates how to implement Google Sign-In and store the credentials in the DATABASE_URL environment variable. It provides a clean, organized approach to authentication with minimal duplication.
+Mantra Demo is a modern FastAPI application that demonstrates how to build a robust integration platform with Google services. It provides a clean, organized approach to authentication, API integration, and workflow management.
 
-The Mantra Demo is a FastAPI-based application that showcases:
+### Key Features
 
-- Google OAuth2 authentication flow
-- Secure credential storage in database
-- Optional credential storage in DATABASE_URL environment variable
-- Integration with Google services (Gmail, Calendar)
-- SQLAlchemy ORM for database operations
-- Clean architecture with separation of concerns
+- 🔐 Google OAuth2 authentication flow
+- 💾 Secure credential storage in database
+- 🔄 Integration with Google services (Gmail, Calendar)
+- 📊 N8N workflow integration
+- 🗃️ SQLAlchemy ORM with support for SQLite and PostgreSQL
+- 🏗️ Clean architecture with separation of concerns
 
-## Setup
+## 🚀 Quick Start
 
-1. Create a Google Cloud project and enable the Google OAuth API
-2. Create OAuth credentials (Web application type)
-3. Add authorized redirect URIs: `http://localhost:8000/api/google/callback`
-4. Copy your Client ID and Client Secret
-5. Create a `.env` file based on `.env.example` and add your Google credentials:
+### Prerequisites
+
+- Python 3.9+
+- pip
+- Git
+- Node.js (for frontend development)
+
+### Installation
+
+1. **Clone the repository**
+
+```bash
+git clone https://github.com/yourusername/Mantra-Demo.git
+cd Mantra-Demo
+```
+
+2. **Set up a virtual environment**
+
+```bash
+python -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+```
+
+3. **Install dependencies**
+
+```bash
+pip install -r requirements.txt
+```
+
+4. **Configure environment variables**
+
+Create a `.env` file based on `.env.template`:
+
+```bash
+cp .env.template .env
+```
+
+Edit the `.env` file with your Google OAuth credentials:
 
 ```
 GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
@@ -29,13 +64,7 @@ GOOGLE_CLIENT_SECRET=your-client-secret
 SESSION_SECRET_KEY=your-secret-key-here
 ```
 
-## Installation
-
-```bash
-pip install -r requirements.txt
-```
-
-## Running the Application
+5. **Run the application**
 
 ```bash
 python app.py
@@ -43,7 +72,32 @@ python app.py
 
 Then open your browser to http://localhost:8000
 
-## Environment Management
+## 🧪 Testing
+
+Run the test suite:
+
+```bash
+# Run all tests
+python tests/scripts/run_tests.py
+
+# Run only unit tests
+python tests/scripts/run_tests.py --unit
+
+# Run only integration tests
+python tests/scripts/run_tests.py --integration
+
+# Run only end-to-end tests
+python tests/scripts/run_tests.py --e2e
+
+# Generate coverage report
+python tests/scripts/run_tests.py --coverage
+```
+
+For more details on testing, see the [Testing Guide](docs/guides/testing.md).
+
+## 🔧 Development
+
+### Environment Management
 
 Switch between development and production environments:
 
@@ -58,34 +112,7 @@ python scripts/switch_env.py production
 python scripts/switch_env.py test
 ```
 
-## Testing
-
-Run the test suite:
-
-```bash
-# Run all tests
-python scripts/run_tests.py
-
-# Run only unit tests
-python scripts/run_tests.py --unit
-
-# Run only integration tests
-python scripts/run_tests.py --integration
-
-# Generate coverage report
-python scripts/run_tests.py --coverage
-```
-
-## Documentation
-
-Detailed documentation is available in the `docs` directory:
-
-- [Architecture](docs/architecture.md)
-- [API Routes](docs/routes/api_routes.md)
-- [Google Providers](docs/providers/google.md)
-- [Testing](docs/testing.md)
-
-## Using the Credentials
+### Using Google Credentials
 
 To use the stored credentials in your code:
 
@@ -103,18 +130,68 @@ from googleapiclient.discovery import build
 service = build('gmail', 'v1', credentials=credentials)
 ```
 
-## Known Issues and TODOs
+## 📚 Documentation
 
-- **Security**: Hardcoded user ID in `get_current_user` function should be replaced with proper authentication
-- **Duplication**: Some duplication exists between `custom_routes` and `routes` directories
-- **Error Handling**: Improve error handling and user feedback
-- **Testing**: Increase test coverage, especially for edge cases
-- **Documentation**: Add API documentation with Swagger/OpenAPI
+Comprehensive documentation is available in the `docs` directory:
 
-## Contributing
+### Architecture
+- [System Architecture](docs/architecture/overview.md)
+- [Data Models](docs/architecture/data_models.md)
+- [Authentication Flow](docs/architecture/authentication.md)
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+### API Documentation
+- [API Overview](docs/api/overview.md)
+- [API Routes](docs/api/routes.md)
+- [API Examples](docs/api/examples.md)
 
-## License
+### Development Guides
+- [Development Setup](docs/development/setup.md)
+- [Coding Standards](docs/development/coding_standards.md)
+- [Testing Guide](docs/guides/testing.md)
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+### Integration Guides
+- [Google Integration](docs/guides/google_integration.md)
+- [N8N Integration](docs/guides/n8n_integration.md)
+- [Database Configuration](docs/guides/database_config.md)
+
+## 🤝 Contributing
+
+We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details on how to get started.
+
+### Project Structure
+
+```
+mantra-demo/
+├── alembic/              # Database migrations
+├── docs/                 # Documentation
+├── scripts/              # Utility scripts
+├── src/                  # Source code
+│   ├── adapters/         # External service adapters
+│   ├── api/              # API definitions
+│   ├── auth/             # Authentication logic
+│   ├── models/           # Data models
+│   ├── providers/        # Service providers (Google, etc.)
+│   ├── routes/           # API routes
+│   ├── services/         # Business logic
+│   ├── static/           # Static files
+│   ├── templates/        # HTML templates
+│   └── utils/            # Utility functions
+├── tests/                # Test suite
+│   ├── unit/             # Unit tests
+│   ├── integration/      # Integration tests
+│   └── e2e/              # End-to-end tests
+├── .env.template         # Environment variables template
+├── app.py                # Application entry point
+└── README.md             # This file
+```
+
+## 📝 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🙏 Acknowledgements
+
+- [FastAPI](https://fastapi.tiangolo.com/) for the web framework
+- [SQLAlchemy](https://www.sqlalchemy.org/) for the ORM
+- [Google API](https://developers.google.com/api-client-library/python) for integration capabilities
+- [N8N](https://n8n.io/) for workflow automation

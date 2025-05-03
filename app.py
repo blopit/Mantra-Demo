@@ -4,7 +4,7 @@ Main application entry point for the Mantra Demo application.
 This module initializes and configures the FastAPI application, including:
 - Environment variable loading
 - Logging configuration
-- Middleware setup (CORS, Sessions)
+- Middleware setup (CORS, Sessions, Error Handling)
 - Template and static file configuration
 - Basic endpoints for the application
 
@@ -58,11 +58,20 @@ app.add_middleware(
 templates = Jinja2Templates(directory="src/templates")
 app.mount("/static", StaticFiles(directory="src/static"), name="static")
 
+# Add error handling middleware
+from src.middleware.error_handler import add_error_handlers
+add_error_handlers(app)
+
 # Import and include routes
 from src.routes.google_auth_consolidated import router as google_auth_router
+from src.routes.google_tiles import router as google_tiles_router
 from src.routes.mantra import router as mantra_router
+from src.routes.google_integration_wrapper import router as google_integration_router
+
 app.include_router(google_auth_router)
+app.include_router(google_tiles_router)
 app.include_router(mantra_router)
+app.include_router(google_integration_router)
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):

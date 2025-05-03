@@ -1,6 +1,6 @@
 ---
-description:
-globs:
+description: Rule to enforce adding or updating tests after fixing errors
+globs: 
 alwaysApply: false
 ---
 description: "Rule to enforce adding or updating tests after fixing errors"

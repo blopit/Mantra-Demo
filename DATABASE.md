@@ -10,6 +10,16 @@ The application supports three database environments:
 2. **Production**: Uses PostgreSQL/Supabase by default, but can fall back to SQLite
 3. **Testing**: Always uses an in-memory SQLite database
 
+## Standardized Database Usage
+
+The application now uses a single, standardized database file:
+
+- **Development**: `mantra.db` (SQLite)
+- **Production**: PostgreSQL/Supabase database specified by `DATABASE_URL`
+- **Testing**: In-memory SQLite database
+
+This standardization ensures that all components of the application use the same database, avoiding data fragmentation and inconsistency.
+
 ## Configuration
 
 Database configuration is managed through environment variables in the `.env` file:
@@ -18,11 +28,18 @@ Database configuration is managed through environment variables in the `.env` fi
 # Environment (development or production)
 ENVIRONMENT=development
 
-# Development database URL (used when ENVIRONMENT=development)
-DATABASE_URL_DEV=sqlite:///mantra_dev.db
+# SQLite Configuration (Development)
+DATABASE_URL_DEV=sqlite:///mantra.db
+SQLITE_PATH=mantra.db
 
-# Production database URL (used when ENVIRONMENT=production)
-DATABASE_URL=postgresql://user:password@host:port/dbname
+# PostgreSQL Configuration (Production)
+DATABASE_URL=postgresql+asyncpg://user:password@host:port/dbname
+
+# Database Pool Configuration (for PostgreSQL)
+POOL_SIZE=5
+MAX_OVERFLOW=10
+POOL_TIMEOUT=30
+POOL_RECYCLE=1800
 ```
 
 ### SQLite Configuration
@@ -30,26 +47,38 @@ DATABASE_URL=postgresql://user:password@host:port/dbname
 For SQLite, the database URL format is:
 
 ```
-sqlite:///path/to/database.db
+sqlite:///mantra.db
 ```
 
-The default SQLite databases are:
-- Development: `sqlite:///mantra_dev.db`
-- Production: `sqlite:///mantra.db`
+The application will automatically convert this to the async version (`sqlite+aiosqlite:///mantra.db`) if needed.
 
 ### PostgreSQL/Supabase Configuration
 
 For PostgreSQL or Supabase, the database URL format is:
 
 ```
-postgresql://username:password@host:port/dbname
+postgresql+asyncpg://username:password@host:port/dbname
 ```
 
 For Supabase with SSL, use:
 
 ```
-postgresql://username:password@host:port/dbname?sslmode=require
+postgresql+asyncpg://username:password@host:port/dbname?sslmode=require
 ```
+
+## Database Migration
+
+If you have multiple database files from previous versions, you can migrate the data to the standardized database using the provided migration script:
+
+```bash
+# Run the database migration script
+python scripts/migrate_databases.py
+```
+
+This script will:
+1. Read the list of legacy database files from the `LEGACY_DB_PATHS` environment variable
+2. Migrate all tables and data from these databases to the target database (`mantra.db`)
+3. Handle conflicts and ensure data integrity during the migration
 
 ## Switching Environments
 

@@ -60,6 +60,8 @@ class MantraInstallation(Base):
         status (str): Current status (active, paused, error)
         config (JSON): User-specific configuration for the mantra
         n8n_workflow_id (Integer): ID of the activated workflow in n8n
+        is_active (bool): Whether the installation is currently active
+        disconnected_at (datetime): When the mantra was uninstalled/deactivated
     
     Relationships:
         mantra: Many-to-one relationship with Mantra
@@ -74,6 +76,8 @@ class MantraInstallation(Base):
     status = Column(String, default="active")
     config = Column(JSON)
     n8n_workflow_id = Column(Integer)
+    is_active = Column(Boolean, default=True)
+    disconnected_at = Column(DateTime(timezone=True))
     
     # Relationships
     mantra = relationship("Mantra", back_populates="installations")
