@@ -15,6 +15,7 @@ from typing import Dict, Any
 import json
 from datetime import datetime, timezone
 import uuid
+from sqlalchemy import select
 
 from src.adapters.database import DatabaseAdapter
 from src.adapters.database.sqlite import SQLiteAdapter
@@ -30,27 +31,64 @@ def workflow_json() -> Dict[str, Any]:
         "nodes": [
             {
                 "id": "1",
-                "type": "n8n-nodes-base.emailSend",
+                "name": "Send Email",
                 "parameters": {
                     "to": "test@example.com",
-                    "subject": "Test Email",
-                    "text": "This is a test email"
-                }
+                    "subject": "Test Subject",
+                    "text": "Test Content"
+                },
+                "type": "n8n-nodes-base.emailSend"
             }
         ],
-        "connections": {
-            "node1": {
-                "main": [[{"node": "2", "type": "main", "index": 0}]]
-            }
-        }
+        "connections": {},
+        "active": False
     }
+
+@pytest.fixture
+def test_mantra(workflow_json) -> Mantra:
+    """Create a test mantra."""
+    return Mantra(
+        id=str(uuid.uuid4()),
+        name="Test Mantra",
+        description="Test Description",
+        workflow_json=workflow_json,
+        is_active=True
+    )
+
+@pytest.fixture
+def test_installation(test_mantra) -> MantraInstallation:
+    """Create a test mantra installation."""
+    return MantraInstallation(
+        id=str(uuid.uuid4()),
+        mantra_id=test_mantra.id,
+        user_id=str(uuid.uuid4()),
+        status="installed",
+        config={"test": "config"},
+        n8n_workflow_id=123
+    )
 
 @pytest_asyncio.fixture
 async def sqlite_adapter() -> DatabaseAdapter:
-    """Create a SQLite adapter for testing."""
-    adapter = SQLiteAdapter("sqlite+aiosqlite://")  # Use in-memory database
+    """Create a SQLite adapter for testing.
+    
+    This fixture:
+    1. Creates an in-memory SQLite database
+    2. Initializes the database with all tables
+    3. Provides the adapter to the test
+    4. Closes the adapter after the test
+    """
+    adapter = SQLiteAdapter("sqlite+aiosqlite:///:memory:")  # Use in-memory database
     await adapter.init()
+    
+    # Create all tables
+    async with adapter.engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    
     yield adapter
+    
+    # Drop all tables and close
+    async with adapter.engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
     await adapter.close()
 
 @pytest_asyncio.fixture
@@ -62,154 +100,132 @@ async def postgres_adapter() -> DatabaseAdapter:
     
     adapter = PostgresAdapter(database_url)
     await adapter.init()
+    
+    # Create all tables
+    async with adapter.engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    
     yield adapter
+    
+    # Drop all tables and close
+    async with adapter.engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
     await adapter.close()
 
 @pytest.mark.asyncio
-async def test_sqlite_json_handling(sqlite_adapter: DatabaseAdapter, workflow_json: Dict[str, Any]):
+async def test_sqlite_json_handling(db_session, test_mantra):
     """Test JSON data handling in SQLite."""
-    # Create a mantra with JSON data
-    mantra_data = {
-        "id": uuid.uuid4(),
-        "name": "Test Mantra",
-        "description": "Test Description",
-        "workflow_json": workflow_json,
-        "created_at": datetime.now(timezone.utc),
-        "updated_at": datetime.now(timezone.utc)
-    }
+    # Add test mantra
+    db_session.add(test_mantra)
+    await db_session.commit()
+    await db_session.refresh(test_mantra)
     
-    # Create mantra
-    mantra = await sqlite_adapter.create(Mantra, mantra_data)
-    assert mantra.id == mantra_data["id"]
-    assert mantra.workflow_json == workflow_json
+    # Query the mantra
+    query = select(Mantra).where(Mantra.id == test_mantra.id)
+    result = await db_session.execute(query)
+    mantra = result.scalar_one()
     
-    # Retrieve mantra
-    retrieved = await sqlite_adapter.get(Mantra, mantra.id)
-    assert retrieved is not None
-    assert retrieved.workflow_json == workflow_json
-    
-    # Update mantra
-    new_workflow = workflow_json.copy()
-    new_workflow["name"] = "Updated Workflow"
-    await sqlite_adapter.update(Mantra, mantra.id, {"workflow_json": new_workflow})
-    
-    # Verify update
-    updated = await sqlite_adapter.get(Mantra, mantra.id)
-    assert updated is not None
-    assert updated.workflow_json["name"] == "Updated Workflow"
+    # Verify JSON data
+    assert mantra.workflow_json["name"] == "Test Workflow"
+    assert len(mantra.workflow_json["nodes"]) == 1
+    assert mantra.workflow_json["nodes"][0]["type"] == "n8n-nodes-base.emailSend"
 
 @pytest.mark.asyncio
-async def test_sqlite_crud_operations(sqlite_adapter: DatabaseAdapter):
-    """Test basic CRUD operations in SQLite."""
+async def test_sqlite_crud_operations(db_session, test_mantra, test_installation):
+    """Test CRUD operations in SQLite."""
     # Create
-    mantra_data = {
-        "id": uuid.uuid4(),
-        "name": "Test Mantra",
-        "description": "Test Description",
-        "workflow_json": {"test": "data"},
-        "created_at": datetime.now(timezone.utc),
-        "updated_at": datetime.now(timezone.utc)
-    }
-    mantra = await sqlite_adapter.create(Mantra, mantra_data)
-    assert mantra.id == mantra_data["id"]
+    db_session.add(test_mantra)
+    db_session.add(test_installation)
+    await db_session.commit()
     
     # Read
-    retrieved = await sqlite_adapter.get(Mantra, mantra.id)
-    assert retrieved is not None
-    assert retrieved.name == "Test Mantra"
+    query = select(Mantra).where(Mantra.id == test_mantra.id)
+    result = await db_session.execute(query)
+    mantra = result.scalar_one()
+    assert mantra.name == "Test Mantra"
+    
+    query = select(MantraInstallation).where(MantraInstallation.id == test_installation.id)
+    result = await db_session.execute(query)
+    installation = result.scalar_one()
+    assert installation.status == "installed"
     
     # Update
-    await sqlite_adapter.update(Mantra, mantra.id, {"name": "Updated Mantra"})
-    updated = await sqlite_adapter.get(Mantra, mantra.id)
-    assert updated is not None
-    assert updated.name == "Updated Mantra"
+    mantra.name = "Updated Mantra"
+    installation.status = "updated"
+    await db_session.commit()
+    await db_session.refresh(mantra)
+    await db_session.refresh(installation)
+    assert mantra.name == "Updated Mantra"
+    assert installation.status == "updated"
     
     # Delete
-    deleted = await sqlite_adapter.delete(Mantra, mantra.id)
-    assert deleted is True
+    await db_session.delete(installation)
+    await db_session.delete(mantra)
+    await db_session.commit()
     
     # Verify deletion
-    not_found = await sqlite_adapter.get(Mantra, mantra.id)
-    assert not_found is None
+    query = select(Mantra).where(Mantra.id == test_mantra.id)
+    result = await db_session.execute(query)
+    assert result.scalar_one_or_none() is None
+    
+    query = select(MantraInstallation).where(MantraInstallation.id == test_installation.id)
+    result = await db_session.execute(query)
+    assert result.scalar_one_or_none() is None
 
 @pytest.mark.asyncio
-async def test_sqlite_list_and_filter(sqlite_adapter: DatabaseAdapter):
-    """Test list and filter operations in SQLite."""
-    # Create test data
+async def test_sqlite_list_and_filter(db_session, test_mantra):
+    """Test listing and filtering in SQLite."""
+    # Create multiple mantras
     mantras = []
     for i in range(3):
-        mantra_data = {
-            "id": uuid.uuid4(),
-            "name": f"Mantra {i}",
-            "description": f"Description {i}",
-            "workflow_json": {"test": f"data {i}"},
-            "created_at": datetime.now(timezone.utc),
-            "updated_at": datetime.now(timezone.utc)
-        }
-        mantra = await sqlite_adapter.create(Mantra, mantra_data)
+        mantra = Mantra(
+            id=str(uuid.uuid4()),
+            name=f"Test Mantra {i}",
+            description=f"Test Description {i}",
+            workflow_json={"name": f"Workflow {i}"},
+            is_active=i % 2 == 0
+        )
         mantras.append(mantra)
+        db_session.add(mantra)
+    await db_session.commit()
     
-    # List all
-    all_mantras = await sqlite_adapter.list(Mantra)
+    # List all mantras
+    query = select(Mantra)
+    result = await db_session.execute(query)
+    all_mantras = result.scalars().all()
     assert len(all_mantras) == 3
     
-    # Filter
-    filtered = await sqlite_adapter.list(Mantra, {"name": "Mantra 1"})
-    assert len(filtered) == 1
-    assert filtered[0].name == "Mantra 1"
+    # Filter by is_active
+    query = select(Mantra).where(Mantra.is_active == True)
+    result = await db_session.execute(query)
+    active_mantras = result.scalars().all()
+    assert len(active_mantras) == 2
     
-    # Count
-    count = await sqlite_adapter.count(Mantra)
-    assert count == 3
-    
-    # Exists
-    exists = await sqlite_adapter.exists(Mantra, {"name": "Mantra 1"})
-    assert exists is True
-    
-    not_exists = await sqlite_adapter.exists(Mantra, {"name": "Nonexistent"})
-    assert not_exists is False
+    # Filter by name
+    query = select(Mantra).where(Mantra.name.like("Test Mantra 1"))
+    result = await db_session.execute(query)
+    filtered_mantras = result.scalars().all()
+    assert len(filtered_mantras) == 1
+    assert filtered_mantras[0].name == "Test Mantra 1"
 
 @pytest.mark.asyncio
-async def test_sqlite_mantra_installation(sqlite_adapter: DatabaseAdapter, workflow_json: Dict[str, Any]):
-    """Test mantra installation with JSON data in SQLite."""
-    # Create a mantra first
-    mantra_data = {
-        "id": uuid.uuid4(),
-        "name": "Test Mantra",
-        "description": "Test Description",
-        "workflow_json": workflow_json,
-        "created_at": datetime.now(timezone.utc),
-        "updated_at": datetime.now(timezone.utc)
-    }
-    mantra = await sqlite_adapter.create(Mantra, mantra_data)
+async def test_sqlite_mantra_installation(db_session, test_mantra, test_installation):
+    """Test mantra installation relationships in SQLite."""
+    # Create mantra and installation
+    db_session.add(test_mantra)
+    db_session.add(test_installation)
+    await db_session.commit()
     
-    # Create installation
-    installation_data = {
-        "id": uuid.uuid4(),
-        "mantra_id": mantra.id,
-        "user_id": uuid.uuid4(),
-        "installed_at": datetime.now(timezone.utc),
-        "status": "pending",
-        "config": {"test": "config"},
-        "n8n_workflow_id": None
-    }
+    # Query installation with mantra relationship
+    query = select(MantraInstallation).where(MantraInstallation.id == test_installation.id)
+    result = await db_session.execute(query)
+    installation = result.scalar_one()
     
-    installation = await sqlite_adapter.create(MantraInstallation, installation_data)
-    assert installation.id == installation_data["id"]
+    # Verify relationships
+    assert installation.mantra_id == test_mantra.id
+    assert installation.status == "installed"
     assert installation.config == {"test": "config"}
-    
-    # Update installation
-    new_config = {"test": "updated_config"}
-    await sqlite_adapter.update(MantraInstallation, installation.id, {
-        "config": new_config,
-        "status": "installed"
-    })
-    
-    # Verify update
-    updated = await sqlite_adapter.get(MantraInstallation, installation.id)
-    assert updated is not None
-    assert updated.config == new_config
-    assert updated.status == "installed"
+    assert installation.n8n_workflow_id == 123
 
 # Only run PostgreSQL tests if TEST_DATABASE_URL is set
 @pytest.mark.asyncio

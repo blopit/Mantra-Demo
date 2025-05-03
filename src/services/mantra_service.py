@@ -24,7 +24,7 @@ from src.models.users import Users
 from src.models.mantra import Mantra, MantraInstallation
 from src.services.n8n_service import N8nService
 from src.exceptions import MantraNotFoundError, MantraAlreadyInstalledError
-from src.providers.google.transformers import GoogleWorkflowTransformer
+from src.providers.google.transformers.workflow_transformer import GoogleWorkflowTransformer
 
 logger = logging.getLogger(__name__)
 
@@ -170,164 +170,142 @@ class MantraService:
             mantra_id: The ID of the mantra to install
             user_id: The ID of the user installing the mantra
             config: Optional configuration for the installation
-        
+            
         Returns:
             The created MantraInstallation object
-        
+            
         Raises:
-            HTTPException: For various error conditions:
-                - 404: Mantra not found
-                - 400: Already installed, invalid workflow format
-                - 500: Internal server error
+            HTTPException: If installation fails
         """
-        n8n_workflow_id = None
-
         try:
-            # Start transaction
-            async with self.db_session.begin():
-                logger.info(f"Starting mantra installation process for mantra_id={mantra_id}, user_id={user_id}")
-
-                # Get the mantra
-                logger.debug(f"Executing query to fetch mantra with ID: {mantra_id}")
-                stmt = select(Mantra).where(Mantra.id == mantra_id)
-                result = await self.db_session.execute(stmt)
-                mantra = result.scalar_one_or_none()
-
-                if not mantra:
-                    logger.error(f"Mantra {mantra_id} not found")
+            # First check n8n connection
+            logger.info("Checking n8n service connection before installation")
+            try:
+                connection_status = await self.n8n_service.check_connection()
+                if not connection_status["is_connected"]:
+                    error_msg = connection_status.get("error", "Unknown connection error")
+                    logger.error(f"n8n service connection failed: {error_msg}")
                     raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail=f"Mantra {mantra_id} not found"
+                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                        detail=f"n8n service is not available: {error_msg}"
                     )
-                logger.debug(f"Successfully fetched mantra: {mantra.id}")
-
-                # Validate workflow format
-                logger.debug(f"Validating workflow format for mantra {mantra_id}")
-                workflow_data = mantra.workflow_json
-                if not workflow_data or not isinstance(workflow_data, dict) or "nodes" not in workflow_data:
-                    logger.error(f"Invalid workflow format for mantra {mantra_id}: missing 'nodes' field")
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="Invalid workflow format: must contain 'nodes' field"
-                    )
-
-                # Validate nodes
-                if not isinstance(workflow_data["nodes"], list):
-                    logger.error(f"Invalid workflow format for mantra {mantra_id}: 'nodes' must be an array")
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="Invalid workflow format: 'nodes' must be an array"
-                    )
-
-                for node in workflow_data["nodes"]:
-                    if not isinstance(node, dict) or "type" not in node:
-                        logger.error(f"Invalid node format in mantra {mantra_id}: missing required fields")
-                        raise HTTPException(
-                            status_code=status.HTTP_400_BAD_REQUEST,
-                            detail="Node missing required fields: must contain 'type'"
-                        )
-
-                logger.debug(f"Workflow format validation successful for mantra {mantra_id}")
-
-                # Check if already installed
-                logger.debug(f"Checking if mantra {mantra_id} is already installed for user {user_id}")
-                stmt = select(MantraInstallation).where(
-                    and_(
-                        MantraInstallation.mantra_id == mantra_id,
-                        MantraInstallation.user_id == user_id
-                    )
+            except HTTPException as e:
+                # Preserve the original error message from N8N service
+                if "n8n service is not available" in str(e.detail):
+                    raise
+                # Otherwise wrap it in our standard format
+                raise HTTPException(
+                    status_code=e.status_code,
+                    detail=f"n8n service is not available: {e.detail}"
                 )
-                result = await self.db_session.execute(stmt)
-                existing_installation = result.scalar_one_or_none()
+            
+            logger.info("n8n service connection verified")
 
-                if existing_installation:
-                    logger.error(f"Mantra {mantra_id} is already installed for user {user_id}")
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=f"Mantra {mantra_id} is already installed for user {user_id}"
-                    )
+            # Get the mantra
+            query = select(Mantra).where(Mantra.id == mantra_id)
+            result = await self.db_session.execute(query)
+            mantra = result.scalar_one_or_none()
+            
+            if not mantra:
+                logger.error(f"Mantra not found with ID: {mantra_id}")
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Mantra not found: {mantra_id}"
+                )
+            
+            # Check if already installed
+            query = select(MantraInstallation).where(
+                MantraInstallation.mantra_id == mantra_id,
+                MantraInstallation.user_id == user_id
+            )
+            result = await self.db_session.execute(query)
+            existing_installation = result.scalar_one_or_none()
+            
+            if existing_installation:
+                logger.warning(f"Mantra {mantra_id} already installed for user {user_id}")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Mantra already installed"
+                )
+            
+            # Get workflow data
+            workflow_data = mantra.workflow_json
+            if not workflow_data:
+                logger.error(f"No workflow data found for mantra {mantra_id}")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Mantra has no workflow data"
+                )
 
-                try:
-                    # Check if workflow contains Google service nodes and transform if needed
-                    contains_google_nodes = False
-                    google_service_types = ['gmail', 'googlecalendar', 'googledrive', 'googlesheets']
-                    
-                    for node in workflow_data.get('nodes', []):
-                        if node.get('type', '').lower() in google_service_types:
-                            contains_google_nodes = True
-                            break
-                    
-                    # Transform workflow if it contains Google service nodes
-                    if contains_google_nodes:
-                        logger.info("Workflow contains Google service nodes. Applying transformation.")
-                        transformer = GoogleWorkflowTransformer()
-                        workflow_data = transformer.transform_workflow(workflow_data)
+            try:
+                # Check if workflow contains Google service nodes and transform if needed
+                contains_google_nodes = False
+                google_service_types = ['gmail', 'googlecalendar', 'googledrive', 'googlesheets']
                 
-                    # Create workflow in n8n
-                    logger.info(f"Creating n8n workflow for mantra {mantra_id}")
-                    logger.debug(f"Workflow JSON content: {workflow_data}")
+                for node in workflow_data.get('nodes', []):
+                    if node.get('type', '').lower() in google_service_types:
+                        contains_google_nodes = True
+                        break
+                
+                # Transform workflow if it contains Google service nodes
+                if contains_google_nodes:
+                    logger.info("Workflow contains Google service nodes. Applying transformation.")
+                    transformer = GoogleWorkflowTransformer()
+                    workflow_data = transformer.transform_workflow(workflow_data)
+            
+                # Create workflow in n8n
+                logger.info(f"Creating n8n workflow for mantra {mantra_id}")
+                logger.debug(f"Workflow JSON content: {workflow_data}")
 
-                    n8n_result = await self.n8n_service.create_workflow(workflow_data)
-                    logger.debug(f"n8n workflow creation result: {n8n_result}")
+                n8n_result = await self.n8n_service.create_workflow(workflow_data)
+                logger.debug(f"n8n workflow creation result: {n8n_result}")
 
-                    # Handle both integer and dictionary response formats
-                    n8n_workflow_id = n8n_result["id"] if isinstance(n8n_result, dict) else n8n_result
-                    logger.info(f"Created n8n workflow with ID: {n8n_workflow_id}")
+                # Handle both integer and dictionary response formats
+                n8n_workflow_id = n8n_result["id"] if isinstance(n8n_result, dict) else n8n_result
+                logger.info(f"Created n8n workflow with ID: {n8n_workflow_id}")
 
-                    # Activate the workflow
-                    logger.info(f"Activating n8n workflow {n8n_workflow_id}")
-                    await self.n8n_service.activate_workflow(n8n_workflow_id)
-                    logger.info(f"Successfully activated n8n workflow {n8n_workflow_id}")
+                # Activate the workflow
+                logger.info(f"Activating n8n workflow {n8n_workflow_id}")
+                await self.n8n_service.activate_workflow(n8n_workflow_id)
+                logger.info(f"Successfully activated n8n workflow {n8n_workflow_id}")
 
-                    # Create installation record
-                    installation = MantraInstallation(
-                        mantra_id=mantra_id,
-                        user_id=user_id,
-                        config=config or {},
-                        n8n_workflow_id=n8n_workflow_id,
-                        status="active"
-                    )
+                # Create installation record
+                installation = MantraInstallation(
+                    mantra_id=mantra_id,
+                    user_id=user_id,
+                    config=config or {},
+                    n8n_workflow_id=n8n_workflow_id,
+                    status="active"
+                )
 
-                    self.db_session.add(installation)
-                    await self.db_session.flush()  # Flush to get the ID but don't commit yet
+                self.db_session.add(installation)
+                await self.db_session.flush()  # Flush to get the ID but don't commit yet
 
-                    logger.info(f"Successfully created installation record with ID: {installation.id}")
-                    return installation
+                logger.info(f"Successfully created installation record with ID: {installation.id}")
+                return installation
 
-                except HTTPException as e:
-                    logger.error(f"HTTP error during workflow creation or installation: {str(e)}")
-                    if n8n_workflow_id:
-                        try:
-                            # Try to clean up the n8n workflow if it was created
-                            logger.info(f"Attempting to clean up n8n workflow {n8n_workflow_id}")
-                            await self.n8n_service.delete_workflow(n8n_workflow_id)
-                            logger.info(f"Successfully cleaned up n8n workflow {n8n_workflow_id}")
-                        except Exception as cleanup_error:
-                            logger.error(f"Failed to clean up n8n workflow {n8n_workflow_id}: {str(cleanup_error)}")
-                    raise  # Re-raise the original HTTP exception
-
-                except Exception as e:
-                    logger.error(f"Error during workflow creation or installation: {str(e)}")
-                    if n8n_workflow_id:
-                        try:
-                            # Try to clean up the n8n workflow if it was created
-                            logger.info(f"Attempting to clean up n8n workflow {n8n_workflow_id}")
-                            await self.n8n_service.delete_workflow(n8n_workflow_id)
-                            logger.info(f"Successfully cleaned up n8n workflow {n8n_workflow_id}")
-                        except Exception as cleanup_error:
-                            logger.error(f"Failed to clean up n8n workflow {n8n_workflow_id}: {str(cleanup_error)}")
-                    raise HTTPException(
-                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                        detail=str(e)
-                    )
+            except HTTPException as e:
+                logger.error(f"HTTP error during workflow creation or installation: {str(e)}", extra={
+                    "status_code": e.status_code,
+                    "detail": e.detail
+                })
+                if n8n_workflow_id:
+                    try:
+                        # Try to clean up the n8n workflow if it was created
+                        logger.info(f"Attempting to clean up n8n workflow {n8n_workflow_id}")
+                        await self.n8n_service.delete_workflow(n8n_workflow_id)
+                        logger.info(f"Successfully cleaned up n8n workflow {n8n_workflow_id}")
+                    except Exception as cleanup_error:
+                        logger.error(f"Failed to clean up n8n workflow {n8n_workflow_id}: {str(cleanup_error)}")
+                raise  # Re-raise the original HTTP exception
 
         except HTTPException:
-            raise  # Re-raise HTTP exceptions as is
+            raise  # Re-raise HTTP exceptions
         except Exception as e:
-            logger.error(f"Unexpected error during mantra installation: {str(e)}")
+            logger.exception(f"Unexpected error installing mantra {mantra_id} for user {user_id}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Internal server error"
+                detail=f"Failed to install mantra: {str(e)}"
             )
     
     async def uninstall_mantra(self, installation_id: str, user_id: str) -> None:

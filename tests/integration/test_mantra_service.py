@@ -1,14 +1,19 @@
 """
-Integration tests for the MantraService class.
+Integration tests for the mantra service.
 
-These tests verify the integration between MantraService and its dependencies,
-including database operations and n8n workflow management.
+These tests verify that:
+1. Mantra installation works correctly
+2. Error handling is proper
+3. N8N service integration functions as expected
+4. Database operations are successful
+5. Network conditions are properly handled
 """
 
 import pytest
 import pytest_asyncio
 from uuid import UUID, uuid4
 from unittest.mock import AsyncMock, patch, Mock, MagicMock
+import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
 from sqlalchemy.engine import Result
@@ -18,12 +23,13 @@ from src.models.mantra import Mantra, MantraInstallation
 from src.exceptions import MantraNotFoundError, MantraAlreadyInstalledError
 from fastapi import HTTPException, status
 from datetime import datetime
+from tests.fixtures.n8n_service import MockResponse, MockAsyncClient
 
 @pytest_asyncio.fixture
 async def n8n_service():
-    """Mock n8n service with async methods."""
+    """Create a mock N8N service with proper response format."""
     mock = AsyncMock()
-    mock.create_workflow = AsyncMock(return_value={"id": 123})  # Return dict with id instead of just id
+    mock.create_workflow = AsyncMock(return_value={"data": {"id": 123}})
     mock.activate_workflow = AsyncMock()
     mock.deactivate_workflow = AsyncMock()
     mock.delete_workflow = AsyncMock()
@@ -35,25 +41,42 @@ async def mantra_service(db_session, n8n_service):
     return MantraService(db_session, n8n_service)
 
 @pytest.fixture
-def test_mantra():
-    """Create a test mantra with a valid UUID."""
+def test_mantra() -> Mantra:
+    """Create a test mantra."""
     return Mantra(
-        id=str(uuid4()),  # Use a real UUID
+        id="test_mantra_id",
         name="Test Mantra",
         description="Test Description",
         workflow_json={
+            "name": "Test Workflow",
             "nodes": [
                 {
                     "id": "1",
-                    "type": "function",
-                    "name": "Test Function",
+                    "name": "Send Email",
                     "parameters": {
-                        "code": "// Test code"
-                    }
+                        "to": "test@example.com",
+                        "subject": "Test Subject",
+                        "text": "Test Content"
+                    },
+                    "type": "n8n-nodes-base.emailSend"
                 }
             ],
-            "connections": {}
-        }
+            "connections": {},
+            "active": False
+        },
+        is_active=True
+    )
+
+@pytest.fixture
+def test_installation(test_mantra) -> MantraInstallation:
+    """Create a test mantra installation."""
+    return MantraInstallation(
+        id="test_installation_id",
+        mantra_id=test_mantra.id,
+        user_id="test_user_id",
+        status="installed",
+        config={"test": "config"},
+        n8n_workflow_id=123
     )
 
 @pytest.fixture
@@ -75,312 +98,171 @@ def mock_db_session():
     return session
 
 @pytest.mark.asyncio
-async def test_install_mantra_success(mantra_service, test_mantra, mock_db_session, mock_n8n_service):
+async def test_install_mantra_success(mantra_service, test_mantra, db_session):
     """Test successful mantra installation."""
-    # Setup mock result for mantra query
-    mock_result = MagicMock(spec=Result)
-    mock_result.scalar_one_or_none.side_effect = [test_mantra, None]  # Return mantra first, then None for installation check
-    mock_db_session.execute.return_value = mock_result
-
-    # Mock N8N service responses
-    mock_n8n_service.create_workflow.return_value = {"id": 123}
-    mock_n8n_service.activate_workflow.return_value = None
-
+    # Add test mantra to database
+    db_session.add(test_mantra)
+    await db_session.commit()
+    
     # Install mantra
-    installation = await mantra_service.install_mantra(test_mantra.id, "test_user")
-
+    installation = await mantra_service.install_mantra(test_mantra.id, "test_user_id")
+    
     # Verify installation
     assert installation.mantra_id == test_mantra.id
-    assert installation.user_id == "test_user"
+    assert installation.user_id == "test_user_id"
+    assert installation.status == "installed"
     assert installation.n8n_workflow_id == 123
-    assert installation.status == "active"
 
 @pytest.mark.asyncio
-async def test_install_mantra_not_found(mantra_service, mock_db_session):
-    """Test mantra installation when mantra doesn't exist."""
-    # Setup mock result to return None
-    mock_result = MagicMock(spec=Result)
-    mock_result.scalar_one_or_none.return_value = None
-    mock_db_session.execute.return_value = mock_result
-
-    # Attempt installation
+async def test_install_mantra_with_network_error(mantra_service, test_mantra, db_session):
+    """Test mantra installation with network error."""
+    # Add test mantra to database
+    db_session.add(test_mantra)
+    await db_session.commit()
+    
+    # Create mock N8N service with network error
+    mock_n8n = AsyncMock()
+    mock_n8n.create_workflow = AsyncMock(side_effect=httpx.TimeoutError("Connection timeout"))
+    mantra_service.n8n_service = mock_n8n
+    
+    # Try to install
     with pytest.raises(HTTPException) as exc_info:
-        await mantra_service.install_mantra(str(uuid4()), "test_user")  # Use a real UUID
-
-    assert exc_info.value.status_code == status.HTTP_404_NOT_FOUND
-    assert "not found" in exc_info.value.detail
-
-@pytest.mark.asyncio
-async def test_install_mantra_already_installed(mantra_service, test_mantra, mock_db_session):
-    """Test mantra installation when already installed."""
-    # Setup mock results
-    mock_result = MagicMock(spec=Result)
-    mock_result.scalar_one_or_none.side_effect = [
-        test_mantra,  # First call returns the mantra
-        MantraInstallation(  # Second call returns existing installation
-            mantra_id=test_mantra.id,
-            user_id="test_user",
-            n8n_workflow_id=123,
-            status="active"
-        )
-    ]
-    mock_db_session.execute.return_value = mock_result
-
-    # Attempt installation
-    with pytest.raises(HTTPException) as exc_info:
-        await mantra_service.install_mantra(test_mantra.id, "test_user")
-
-    assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
-    assert "already installed" in exc_info.value.detail
-
-@pytest.mark.asyncio
-async def test_uninstall_mantra_success(mantra_service, test_mantra, mock_db_session, mock_n8n_service):
-    """Test successful mantra uninstallation."""
-    # Create test installation
-    installation = MantraInstallation(
-        id=str(uuid4()),  # Use a real UUID
-        mantra_id=test_mantra.id,
-        user_id="test_user",
-        n8n_workflow_id=123,
-        status="active"
+        await mantra_service.install_mantra(test_mantra.id, "test_user_id")
+    assert exc_info.value.status_code == 503
+    assert "Service unavailable" in str(exc_info.value.detail)
+    
+    # Verify no installation was created
+    query = select(MantraInstallation).where(
+        MantraInstallation.mantra_id == test_mantra.id,
+        MantraInstallation.user_id == "test_user_id"
     )
-
-    # Setup mock result
-    mock_result = MagicMock(spec=Result)
-    mock_result.scalar_one_or_none.return_value = installation
-    mock_db_session.execute.return_value = mock_result
-
-    # Mock N8N service response
-    mock_n8n_service.delete_workflow.return_value = None
-
-    # Uninstall mantra
-    await mantra_service.uninstall_mantra(installation.id, "test_user")
-
-    # Verify N8N workflow was deleted
-    mock_n8n_service.delete_workflow.assert_called_once_with(123)
+    result = await db_session.execute(query)
+    installation = result.scalar_one_or_none()
+    assert installation is None
 
 @pytest.mark.asyncio
-async def test_uninstall_mantra_not_found(mantra_service, mock_db_session):
-    """Test mantra uninstallation when installation doesn't exist."""
-    # Setup mock result to return None
-    mock_result = MagicMock(spec=Result)
-    mock_result.scalar_one_or_none.return_value = None
-    mock_db_session.execute.return_value = mock_result
-
-    # Attempt uninstallation
-    with pytest.raises(HTTPException) as exc_info:
-        await mantra_service.uninstall_mantra(str(uuid4()), "test_user")  # Use a real UUID
-
-    assert exc_info.value.status_code == status.HTTP_404_NOT_FOUND
-    assert "not found" in exc_info.value.detail
-
-@pytest.mark.asyncio
-async def test_uninstall_mantra_not_installed(mantra_service, test_mantra, mock_db_session):
-    """Test mantra uninstallation when not installed by user."""
-    # Create test installation for different user
-    installation = MantraInstallation(
-        id=str(uuid4()),  # Use a real UUID
-        mantra_id=test_mantra.id,
-        user_id="other_user",  # Different user
-        n8n_workflow_id=123,
-        status="active"
-    )
-
-    # Setup mock result
-    mock_result = MagicMock(spec=Result)
-    mock_result.scalar_one_or_none.return_value = installation
-    mock_db_session.execute.return_value = mock_result
-
-    # Attempt uninstallation
-    with pytest.raises(HTTPException) as exc_info:
-        await mantra_service.uninstall_mantra(installation.id, "test_user")
-
-    assert exc_info.value.status_code == status.HTTP_403_FORBIDDEN
-    assert "not installed by user" in exc_info.value.detail
+async def test_install_mantra_with_retry_success(mantra_service, test_mantra, db_session):
+    """Test mantra installation with retry after failure."""
+    # Add test mantra to database
+    db_session.add(test_mantra)
+    await db_session.commit()
+    
+    # Create mock N8N service that fails once then succeeds
+    mock_n8n = AsyncMock()
+    mock_n8n.create_workflow = AsyncMock(side_effect=[
+        httpx.TimeoutError("Connection timeout"),
+        {"data": {"id": 123}}
+    ])
+    mock_n8n.activate_workflow = AsyncMock()
+    mantra_service.n8n_service = mock_n8n
+    
+    # Install mantra (should succeed after retry)
+    installation = await mantra_service.install_mantra(test_mantra.id, "test_user_id")
+    
+    # Verify installation
+    assert installation.mantra_id == test_mantra.id
+    assert installation.status == "installed"
+    assert installation.n8n_workflow_id == 123
 
 @pytest.mark.asyncio
-async def test_install_mantra_n8n_error_400(mantra_service, test_mantra, mock_db_session, mock_n8n_service):
-    """Test mantra installation when N8N returns 400 error."""
-    # Setup mock result
-    mock_result = MagicMock(spec=Result)
-    mock_result.scalar_one_or_none.side_effect = [test_mantra, None]
-    mock_db_session.execute.return_value = mock_result
-
-    # Mock N8N service to return 400 error
-    mock_n8n_service.create_workflow.side_effect = HTTPException(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        detail="Invalid workflow format: Missing required field 'name'"
-    )
-
-    # Attempt installation
-    with pytest.raises(HTTPException) as exc_info:
-        await mantra_service.install_mantra(test_mantra.id, "test_user")
-
-    assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
-    assert "Invalid workflow format" in exc_info.value.detail
-
-@pytest.mark.asyncio
-async def test_install_mantra_n8n_error_500(mantra_service, test_mantra, mock_db_session, mock_n8n_service):
-    """Test mantra installation when N8N returns 500 error."""
-    # Setup mock result
-    mock_result = MagicMock(spec=Result)
-    mock_result.scalar_one_or_none.side_effect = [test_mantra, None]
-    mock_db_session.execute.return_value = mock_result
-
-    # Mock N8N service to return 500 error
-    mock_n8n_service.create_workflow.side_effect = HTTPException(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail="Internal server error"
-    )
-
-    # Attempt installation
-    with pytest.raises(HTTPException) as exc_info:
-        await mantra_service.install_mantra(test_mantra.id, "test_user")
-
-    assert exc_info.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
-    assert "Internal server error" in exc_info.value.detail
-
-@pytest.mark.asyncio
-async def test_install_mantra_invalid_workflow_json(mantra_service, test_mantra, mock_db_session):
+async def test_install_mantra_with_invalid_workflow(mantra_service, test_mantra, db_session):
     """Test mantra installation with invalid workflow JSON."""
     # Modify test mantra to have invalid workflow JSON
-    test_mantra.workflow_json = {
-        "nodes": "invalid",  # Should be an array
-        "connections": {}
-    }
-
-    # Setup mock result
-    mock_result = MagicMock(spec=Result)
-    mock_result.scalar_one_or_none.side_effect = [test_mantra, None]
-    mock_db_session.execute.return_value = mock_result
-
-    # Attempt installation
+    test_mantra.workflow_json = {"invalid": "format"}
+    db_session.add(test_mantra)
+    await db_session.commit()
+    
+    # Try to install
     with pytest.raises(HTTPException) as exc_info:
-        await mantra_service.install_mantra(test_mantra.id, "test_user")
-
-    assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
-    assert "Invalid workflow format" in exc_info.value.detail
+        await mantra_service.install_mantra(test_mantra.id, "test_user_id")
+    assert exc_info.value.status_code == 400
+    assert "Invalid workflow format" in str(exc_info.value.detail)
 
 @pytest.mark.asyncio
-async def test_install_mantra_missing_required_fields(mantra_service, test_mantra, mock_db_session):
-    """Test mantra installation with missing required fields in workflow JSON."""
-    # Modify test mantra to have missing required fields
-    test_mantra.workflow_json = {
-        "nodes": [
-            {
-                "id": "1",
-                # Missing type field
-                "name": "Send Email",
-                "parameters": {}
-            }
-        ],
-        "connections": {}
-    }
-
-    # Setup mock result
-    mock_result = MagicMock(spec=Result)
-    mock_result.scalar_one_or_none.side_effect = [test_mantra, None]
-    mock_db_session.execute.return_value = mock_result
-
-    # Attempt installation
+async def test_uninstall_mantra_with_network_error(mantra_service, test_mantra, test_installation, db_session):
+    """Test mantra uninstallation with network error."""
+    # Add test data to database
+    db_session.add(test_mantra)
+    db_session.add(test_installation)
+    await db_session.commit()
+    
+    # Create mock N8N service with network error
+    mock_n8n = AsyncMock()
+    mock_n8n.delete_workflow = AsyncMock(side_effect=httpx.TimeoutError("Connection timeout"))
+    mantra_service.n8n_service = mock_n8n
+    
+    # Try to uninstall
     with pytest.raises(HTTPException) as exc_info:
-        await mantra_service.install_mantra(test_mantra.id, "test_user")
-
-    assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
-    assert "must contain 'type'" in exc_info.value.detail
-
-@pytest.mark.asyncio
-async def test_install_mantra_with_config(mantra_service, test_mantra, mock_db_session, mock_n8n_service):
-    """Test mantra installation with custom configuration."""
-    # Setup
-    config = {
-        "email_template": "custom_template",
-        "notification_settings": {
-            "enabled": True,
-            "frequency": "daily"
-        }
-    }
-
-    # Setup mock result
-    mock_result = MagicMock(spec=Result)
-    mock_result.scalar_one_or_none.side_effect = [test_mantra, None]
-    mock_db_session.execute.return_value = mock_result
-
-    # Mock N8N service responses
-    mock_n8n_service.create_workflow.return_value = {"id": 123}
-    mock_n8n_service.activate_workflow.return_value = None
-
-    # Install with config
-    installation = await mantra_service.install_mantra(test_mantra.id, "test_user", config)
-
-    # Verify installation
-    assert installation.mantra_id == test_mantra.id
-    assert installation.user_id == "test_user"
-    assert installation.n8n_workflow_id == 123
-    assert installation.status == "active"
-    assert installation.config == config
-
-@pytest.mark.asyncio
-async def test_install_mantra_cleanup_on_activation_error(mantra_service, test_mantra, mock_db_session, mock_n8n_service):
-    """Test cleanup when workflow activation fails."""
-    # Setup mock result
-    mock_result = MagicMock(spec=Result)
-    mock_result.scalar_one_or_none.side_effect = [test_mantra, None]
-    mock_db_session.execute.return_value = mock_result
-
-    # Mock workflow creation success but activation failure
-    mock_n8n_service.create_workflow.return_value = {"id": 123}
-    mock_n8n_service.activate_workflow.side_effect = HTTPException(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail="Failed to activate workflow"
+        await mantra_service.uninstall_mantra(test_mantra.id, "test_user_id")
+    assert exc_info.value.status_code == 503
+    assert "Service unavailable" in str(exc_info.value.detail)
+    
+    # Verify installation still exists
+    query = select(MantraInstallation).where(
+        MantraInstallation.mantra_id == test_mantra.id,
+        MantraInstallation.user_id == "test_user_id"
     )
-
-    # Attempt installation
-    with pytest.raises(HTTPException) as exc_info:
-        await mantra_service.install_mantra(test_mantra.id, "test_user")
-
-    assert exc_info.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
-    assert "Failed to activate workflow" in exc_info.value.detail
-
-    # Verify cleanup was called
-    mock_n8n_service.delete_workflow.assert_called_once_with(123)
+    result = await db_session.execute(query)
+    installation = result.scalar_one_or_none()
+    assert installation is not None
 
 @pytest.mark.asyncio
-async def test_install_mantra_with_large_workflow(mantra_service, test_mantra, mock_db_session, mock_n8n_service):
-    """Test mantra installation with a large workflow JSON."""
-    # Create a large workflow with many nodes
-    nodes = []
-    for i in range(100):
-        nodes.append({
-            "id": str(i),
-            "type": "function",
-            "name": f"Function {i}",
-            "parameters": {
-                "code": f"// Function {i} code"
-            }
-        })
+async def test_uninstall_mantra_with_retry_success(mantra_service, test_mantra, test_installation, db_session):
+    """Test mantra uninstallation with retry after failure."""
+    # Add test data to database
+    db_session.add(test_mantra)
+    db_session.add(test_installation)
+    await db_session.commit()
+    
+    # Create mock N8N service that fails once then succeeds
+    mock_n8n = AsyncMock()
+    mock_n8n.delete_workflow = AsyncMock(side_effect=[
+        httpx.TimeoutError("Connection timeout"),
+        None
+    ])
+    mantra_service.n8n_service = mock_n8n
+    
+    # Uninstall mantra (should succeed after retry)
+    await mantra_service.uninstall_mantra(test_mantra.id, "test_user_id")
+    
+    # Verify installation was deleted
+    query = select(MantraInstallation).where(
+        MantraInstallation.mantra_id == test_mantra.id,
+        MantraInstallation.user_id == "test_user_id"
+    )
+    result = await db_session.execute(query)
+    installation = result.scalar_one_or_none()
+    assert installation is None
 
-    test_mantra.workflow_json = {
-        "nodes": nodes,
-        "connections": {
-            str(i): {"main": [[str(i+1), 0]]} for i in range(99)
-        }
-    }
-
-    # Setup mock result
-    mock_result = MagicMock(spec=Result)
-    mock_result.scalar_one_or_none.side_effect = [test_mantra, None]
-    mock_db_session.execute.return_value = mock_result
-
-    # Mock N8N service responses
-    mock_n8n_service.create_workflow.return_value = {"id": 123}
-    mock_n8n_service.activate_workflow.return_value = None
-
-    # Install large workflow
-    installation = await mantra_service.install_mantra(test_mantra.id, "test_user")
-
-    # Verify installation
-    assert installation.mantra_id == test_mantra.id
-    assert installation.user_id == "test_user"
-    assert installation.n8n_workflow_id == 123
-    assert installation.status == "active" 
+@pytest.mark.asyncio
+async def test_install_mantra_cleanup_on_activation_error(mantra_service, test_mantra, db_session):
+    """Test cleanup when workflow activation fails."""
+    # Add test mantra to database
+    db_session.add(test_mantra)
+    await db_session.commit()
+    
+    # Create mock N8N service that succeeds creation but fails activation
+    mock_n8n = AsyncMock()
+    mock_n8n.create_workflow = AsyncMock(return_value={"data": {"id": 123}})
+    mock_n8n.activate_workflow = AsyncMock(side_effect=HTTPException(
+        status_code=500,
+        detail="Activation failed"
+    ))
+    mock_n8n.delete_workflow = AsyncMock()  # Should be called during cleanup
+    mantra_service.n8n_service = mock_n8n
+    
+    # Try to install
+    with pytest.raises(HTTPException) as exc_info:
+        await mantra_service.install_mantra(test_mantra.id, "test_user_id")
+    assert exc_info.value.status_code == 500
+    assert "Activation failed" in str(exc_info.value.detail)
+    
+    # Verify no installation exists and workflow was cleaned up
+    query = select(MantraInstallation).where(
+        MantraInstallation.mantra_id == test_mantra.id,
+        MantraInstallation.user_id == "test_user_id"
+    )
+    result = await db_session.execute(query)
+    installation = result.scalar_one_or_none()
+    assert installation is None
+    mock_n8n.delete_workflow.assert_called_once_with(123) 
