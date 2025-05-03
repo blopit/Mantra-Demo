@@ -88,13 +88,18 @@ def get_database_url():
         if db_url:
             # Fix potential newline issues in .env file
             db_url = db_url.split('\n')[0].strip()
+
+            # Convert standard SQLite URL to aiosqlite URL if needed
+            if db_url.startswith("sqlite:///") and not db_url.startswith("sqlite+aiosqlite:///"):
+                db_url = db_url.replace("sqlite:///", "sqlite+aiosqlite:///")
+
             db_type = "PostgreSQL" if db_url.startswith("postgresql") else "SQLite"
-            logger.info(f"Using {db_type} database for development")
+            logger.info(f"Using {db_type} database for development: {db_url}")
             return db_url
 
         # Default to SQLite for development
         logger.info("Using default SQLite database for development")
-        return "sqlite+aiosqlite:///mantra_dev.db"
+        return "sqlite+aiosqlite:///mantra.db"
 
     # Production mode - use DATABASE_URL
     db_url = os.getenv("DATABASE_URL")
@@ -196,10 +201,10 @@ SessionLocal = get_session_local(engine)
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Get a database session.
-    
+
     This is a FastAPI dependency that provides a database session
     for route handlers.
-    
+
     Yields:
         AsyncSession: A database session
     """
@@ -213,13 +218,13 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 async def init_db() -> None:
     """Initialize the database connection.
-    
+
     This function should be called during application startup.
     """
     try:
         environment = os.getenv("ENVIRONMENT", "development").lower()
         logger.info(f"Current environment: {environment}")
-        
+
         # Log database configuration
         if environment == "development":
             logger.info("Using default SQLite database for development")
@@ -228,17 +233,17 @@ async def init_db() -> None:
             logger.info("Using PostgreSQL database for production/staging")
             logger.info(f"Pool size: {os.getenv('POOL_SIZE', '5')}")
             logger.info(f"Max overflow: {os.getenv('MAX_OVERFLOW', '10')}")
-        
+
         # Initialize the database adapter
         await DatabaseAdapterFactory.get_adapter()
-        
+
     except Exception as e:
         logger.error(f"Error initializing database: {str(e)}")
         raise
 
 async def close_db() -> None:
     """Close the database connection.
-    
+
     This function should be called during application shutdown.
     """
     try:

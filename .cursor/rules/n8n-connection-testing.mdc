@@ -3,3 +3,61 @@ description:
 globs:
 alwaysApply: false
 ---
+# N8N Connection Testing Guidelines
+
+## Connection Testing Requirements
+1. Test n8n service availability before workflow operations
+2. Validate environment variables are set correctly
+3. Test connection with retries and proper error handling
+4. Log detailed connection errors with context
+
+## Test Coverage Requirements
+1. Unit tests for workflow validation
+2. Integration tests for n8n connectivity
+3. Mock tests for offline development
+4. Error case coverage
+
+## Logging Requirements
+1. Log all connection attempts with timestamps
+2. Log request details (URL, headers minus sensitive data)
+3. Log response status and errors
+4. Log environment configuration (URL, timeout settings)
+
+## Error Handling
+1. Validate environment variables before connection
+2. Check n8n service health status
+3. Proper error classification and reporting
+4. Retry strategy with backoff
+
+## Implementation Guidelines
+1. Use connection health check endpoint
+2. Implement proper timeout handling
+3. Add detailed error context
+4. Include request tracing
+
+## Example Test Structure
+```python
+async def test_n8n_connection():
+    # 1. Setup
+    n8n_service = N8nService(...)
+    
+    # 2. Environment validation
+    assert_environment_configured()
+    
+    # 3. Connection test
+    health_status = await n8n_service.check_health()
+    assert health_status.is_healthy
+    
+    # 4. Workflow creation test
+    result = await n8n_service.create_workflow(...)
+    assert result.success
+```
+
+## Example Logging
+```python
+logger.info("Attempting n8n connection", extra={
+    "api_url": masked_url,
+    "timeout": timeout,
+    "attempt": attempt_number
+})
+```

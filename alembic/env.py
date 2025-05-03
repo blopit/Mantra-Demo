@@ -5,10 +5,19 @@ from sqlalchemy import pool
 
 from alembic import context
 
+import sys
+import os
+
+# Add the project root directory to the Python path
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, project_root)
+
 from src.models.base import Base
 from src.models.users import Users
-from src.models.contacts import Contacts
+from src.models.mantra import Mantra, MantraInstallation
+from src.models.google_auth import GoogleAuth
 from src.models.google_integration import GoogleIntegration
+from src.models.contacts import Contacts
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -21,6 +30,8 @@ if config.config_file_name is not None:
 
 # add your model's MetaData object here
 # for 'autogenerate' support
+# from myapp import mymodel
+# target_metadata = mymodel.Base.metadata
 target_metadata = Base.metadata
 
 # other values from the config, defined by the needs of env.py,
