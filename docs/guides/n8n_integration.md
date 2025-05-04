@@ -4,36 +4,26 @@ This guide explains how to integrate with N8N workflow automation in the Mantra 
 
 ## Overview
 
-The application integrates with [N8N](https://n8n.io/), a workflow automation tool, to create and manage workflows. N8N allows you to connect various services and automate tasks between them.
+The application integrates with [N8N Cloud](https://n8n.io/cloud/), a workflow automation tool, to create and manage workflows. N8N allows you to connect various services and automate tasks between them.
 
 ## N8N Architecture
 
 ```
 ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
 │                 │     │                 │     │                 │
-│  Mantra Demo    │────▶│  N8N Service    │────▶│  N8N Instance   │
-│  Application    │     │  Adapter        │     │                 │
+│  Mantra Demo    │────▶│  N8N Service    │────▶│  N8N Cloud      │
+│  Application    │     │  Adapter        │     │  Instance       │
 │                 │     │                 │     │                 │
 └─────────────────┘     └─────────────────┘     └─────────────────┘
 ```
 
-## Setting Up N8N
+## Setting Up N8N Cloud
 
-### Step 1: Create an N8N Instance
-
-You can use [N8N Cloud](https://www.n8n.cloud/) or self-host N8N:
-
-#### Option 1: N8N Cloud
+### Step 1: Create an N8N Cloud Account
 
 1. Sign up for [N8N Cloud](https://www.n8n.cloud/)
 2. Create a new workspace
 3. Get your API key from the workspace settings
-
-#### Option 2: Self-Hosted N8N
-
-1. Follow the [N8N installation guide](https://docs.n8n.io/hosting/)
-2. Enable the REST API
-3. Create an API key
 
 ### Step 2: Configure Environment Variables
 
@@ -241,39 +231,118 @@ async def n8n_webhook(
     """Handle N8N webhook."""
     # Get the webhook data
     data = await request.json()
-    
+
     # Process the webhook data
     # ...
-    
+
     return {"status": "success"}
 ```
 
-## Best Practices
+## Working with Webhooks
 
-1. **Error Handling**: Implement proper error handling for N8N API calls
-2. **Idempotency**: Design workflows to be idempotent (can be run multiple times without side effects)
-3. **Monitoring**: Monitor workflow executions and handle failures
-4. **Security**: Secure webhook endpoints with authentication
-5. **Rate Limiting**: Be aware of N8N API rate limits
+### Webhook Activation Process
+
+When creating workflows with webhooks, the activation process is crucial:
+
+1. **Workflow Creation**: Create the workflow with webhook nodes
+2. **Activation**: The workflow must be activated for webhooks to work
+3. **Registration**: Webhooks are automatically registered upon activation
+4. **Verification**: The system verifies webhook accessibility
+
+### Webhook URL Structure
+
+Webhook URLs for n8n cloud follow this pattern:
+```
+https://your-workspace.app.n8n.cloud/webhook/{workflow_id}/{path}
+```
+
+Where:
+- `your-workspace`: Your n8n cloud workspace name
+- `workflow_id`: The ID of your workflow
+- `path`: The path configured in your webhook node
+
+### Important Notes
+
+1. **Activation Timing**:
+   - Webhooks take a few seconds to register after activation
+   - The system automatically retries if registration fails
+   - Default wait time is 3 seconds after activation
+
+2. **URL Availability**:
+   - Production webhook URLs only work when workflow is active
+   - Test webhook URLs work regardless of activation status
+   - Always use production URLs in production environment
 
 ## Troubleshooting
 
 ### Common Issues
 
-1. **Authentication Errors**:
+1. **404 Not Found Errors**:
+   - **Cause**: Webhook not yet registered after activation
+   - **Solution**:
+     - Wait a few seconds after activation
+     - Ensure workflow is actually active
+     - Check webhook path configuration
+
+2. **Authentication Errors**:
    - Check that your N8N API key is correct
-   - Verify that the API key has the necessary permissions
+   - Verify API key has necessary permissions
+   - Ensure headers are properly set
 
-2. **Workflow Execution Errors**:
-   - Check the workflow configuration for errors
-   - Verify that all required credentials are set up in N8N
+3. **Webhook Registration Failures**:
+   - Verify workflow is properly activated
+   - Check webhook node configuration
+   - Ensure webhook path is valid
+   - Look for conflicting webhook paths
 
-3. **Webhook Errors**:
-   - Ensure that webhook URLs are accessible from N8N
-   - Check that webhook endpoints are properly handling the data
+### Debugging Steps
+
+If webhooks aren't working:
+
+1. Check workflow status:
+   ```python
+   workflow = await n8n_service.get_workflow(workflow_id)
+   print(f"Active status: {workflow.get('active')}")
+   ```
+
+2. Verify webhook URL:
+   ```python
+   webhook_url = await n8n_service.get_webhook_url(workflow_id)
+   print(f"Webhook URL: {webhook_url}")
+   ```
+
+3. Test webhook manually:
+   ```bash
+   curl -X POST \
+     -H "Content-Type: application/json" \
+     -d '{"test": "data"}' \
+     https://your-workspace.app.n8n.cloud/webhook/{workflow_id}/{path}
+   ```
+
+## Best Practices
+
+1. **Error Handling**:
+   - Implement proper error handling for N8N API calls
+   - Use exponential backoff for retries
+   - Log all webhook-related errors
+
+2. **Activation Management**:
+   - Always verify activation status
+   - Wait for webhook registration
+   - Test webhooks after activation
+
+3. **Monitoring**:
+   - Monitor workflow executions
+   - Track webhook success rates
+   - Set up alerts for failures
+
+4. **Security**:
+   - Secure webhook endpoints
+   - Use HTTPS for all URLs
+   - Validate webhook payloads
 
 ## Further Reading
 
 - [N8N Documentation](https://docs.n8n.io/)
 - [N8N API Reference](https://docs.n8n.io/api/)
-- [N8N Nodes Reference](https://docs.n8n.io/integrations/builtin/)
+- [N8N Webhook Node](https://docs.n8n.io/integrations/builtin/core-nodes/n8n-nodes-base.webhook/)

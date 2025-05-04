@@ -266,45 +266,60 @@ class MantraService:
             workflow_data = mantra.workflow_json
             
             # Create workflow in n8n
+            n8n_workflow = None
+            n8n_workflow_id = None
+            
             try:
                 # Create the workflow
                 n8n_workflow = await self.n8n_service.create_workflow(workflow_data)
-                n8n_workflow_id = n8n_workflow["id"]  # Use string ID directly
+                if not n8n_workflow:
+                    raise ValueError("No workflow returned by n8n")
+                
+                n8n_workflow_id = n8n_workflow.get("id")
                 if not n8n_workflow_id:
                     raise ValueError("No workflow ID returned by n8n")
                 
+                logger.info(f"Created n8n workflow with ID: {n8n_workflow_id}")
+                
                 # Activate the workflow
-                await self.n8n_service.activate_workflow(n8n_workflow_id)
+                activation_result = await self.n8n_service.activate_workflow(n8n_workflow_id)
+                if not activation_result:
+                    raise ValueError("Failed to activate workflow")
+                
                 logger.info(f"Activated n8n workflow {n8n_workflow_id}")
+                
+                # Create installation record
+                installation = MantraInstallation(
+                    mantra_id=mantra_id,
+                    user_id=user_id,
+                    n8n_workflow_id=n8n_workflow_id,
+                    config=config or {},
+                    status="active",
+                    is_active=True
+                )
+                
+                self.db_session.add(installation)
+                await self.db_session.commit()
+                await self.db_session.refresh(installation)
+                
+                return installation
                 
             except Exception as e:
                 logger.error(f"Error setting up n8n workflow: {str(e)}")
                 # Clean up workflow if it was created
-                if 'n8n_workflow_id' in locals():
+                if n8n_workflow_id:
                     try:
                         await self.n8n_service.delete_workflow(n8n_workflow_id)
                     except Exception as cleanup_error:
                         logger.warning(f"Failed to clean up workflow after error: {str(cleanup_error)}")
+                
+                # Roll back any database changes
+                await self.db_session.rollback()
+                
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail=f"Error setting up n8n workflow: {str(e)}"
                 )
-            
-            # Create installation record
-            installation = MantraInstallation(
-                mantra_id=mantra_id,
-                user_id=user_id,
-                n8n_workflow_id=n8n_workflow_id,  # Store string ID
-                config=config or {},
-                status="active",
-                is_active=True
-            )
-            
-            self.db_session.add(installation)
-            await self.db_session.commit()
-            await self.db_session.refresh(installation)
-            
-            return installation
             
         except HTTPException:
             raise

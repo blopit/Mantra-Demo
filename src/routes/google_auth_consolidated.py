@@ -145,16 +145,20 @@ async def get_auth_url(
     try:
         flow = build_google_oauth(scopes)
         
+        # Generate state parameter
+        state = str(uuid.uuid4())
+        
+        # Store state in session
+        request.session["state"] = state
+        logger.info(f"Generated auth URL with state: {state}")
+        
         # Generate authorization URL with specified parameters
-        authorization_url, state = flow.authorization_url(
+        authorization_url, _ = flow.authorization_url(
             access_type=access_type,
             include_granted_scopes="false",  # Never include previously granted scopes
-            prompt="consent"  # Always show consent screen to ensure correct scopes
+            prompt="consent",  # Always show consent screen to ensure correct scopes
+            state=state  # Use our generated state
         )
-        
-        # Store state in session with the correct key
-        request.session["oauth_state"] = state
-        logger.info(f"Generated auth URL with state: {state}")
         
         return {"auth_url": authorization_url}
         
@@ -175,7 +179,7 @@ async def google_callback(
     """Handle Google OAuth callback."""
     try:
         # Verify state to prevent CSRF
-        stored_state = request.session.get("oauth_state")
+        stored_state = request.session.get("state")
         logger.info(f"Verifying state: received={state}, stored={stored_state}")
         
         if not stored_state:
@@ -205,37 +209,37 @@ async def google_callback(
         # Find or create user
         user_result = await db.execute(select(Users).filter_by(email=user_info["email"]))
         user = user_result.scalars().first()
+        
         if not user:
-            logger.info(f"Creating new user with email: {user_info.get('email')}")
+            # Create new user
+            logger.info("Creating new user")
             user = Users(
                 id=user_info["sub"],  # Use Google's sub as the user ID
                 email=user_info["email"],
                 name=user_info.get("name", ""),
-                profile_picture=user_info.get("picture", "")
+                profile_picture=user_info.get("picture", ""),
+                is_active=True
             )
             db.add(user)
             await db.commit()
+            await db.refresh(user)
             logger.info(f"Created new user with ID: {user.id}")
-        else:
-            logger.info(f"Found existing user with ID: {user.id}")
-            
-        # Store user in session
+        
+        # Store user info in session
+        request.session["user_id"] = user.id
         request.session["user"] = {
             "id": user.id,
             "email": user.email,
             "name": user.name,
-            "profile_picture": user.profile_picture
+            "picture": user.profile_picture
         }
-        request.session["user_id"] = user.id
-        logger.info("Stored user in session")
         
-        # Check if integration already exists
-        integration_result = await db.execute(select(GoogleIntegration).filter(
-            GoogleIntegration.user_id == user.id,
-            GoogleIntegration.google_account_id == user_info["sub"]
-        ))
+        # Find existing integration
+        integration_result = await db.execute(
+            select(GoogleIntegration).filter_by(user_id=user.id)
+        )
         integration = integration_result.scalars().first()
-
+        
         if not integration:
             # Create new integration
             logger.info("Creating new Google integration")

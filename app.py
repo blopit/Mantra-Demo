@@ -13,13 +13,16 @@ The application uses localStorage for user management.
 
 import os
 import logging
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Depends
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 from dotenv import load_dotenv
+from sqlalchemy.orm import Session
+from src.database.db import get_db
+from src.models.google_integration import GoogleIntegration
 
 # Load environment variables
 load_dotenv()
@@ -90,7 +93,8 @@ async def index(request: Request):
 async def signin(
     request: Request,
     status: str = None,
-    success: bool = False
+    success: bool = False,
+    db: Session = Depends(get_db)
 ):
     """Redirect to accounts if logged in, otherwise show sign-in page with status"""
     # Check if user is authenticated
@@ -98,13 +102,33 @@ async def signin(
     if user and not status:  # Only redirect if there's no status message to show
         return RedirectResponse(url="/accounts", status_code=302)
 
+    # Check for existing Google integration if we have a user
+    google_integration = None
+    if user:
+        try:
+            # Query the database for active Google integration
+            integration = db.query(GoogleIntegration).filter(
+                GoogleIntegration.email == user.get("email"),
+                GoogleIntegration.status == "connected"
+            ).first()
+            if integration:
+                google_integration = {
+                    "email": integration.email,
+                    "status": integration.status,
+                    "connected_at": integration.created_at
+                }
+        except Exception as e:
+            logger.error(f"Error checking Google integration: {e}")
+
     return templates.TemplateResponse(
         "google_signin.html",
         {
             "request": request,
             "google_client_id": os.getenv("GOOGLE_CLIENT_ID", ""),
             "status": status,
-            "success": success
+            "success": success,
+            "user_id": user.get("id") if user else None,
+            "google_integration": google_integration
         }
     )
 
