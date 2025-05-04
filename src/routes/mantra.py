@@ -26,6 +26,7 @@ from src.models.mantra import Mantra, MantraInstallation
 from src.providers.google.transformers import GoogleWorkflowTransformer
 from src.utils.api_response import success_response, error_response
 from src.exceptions import MantraError, MantraNotFoundError
+from src.utils.auth import get_authenticated_user
 
 router = APIRouter(
     prefix="/api/mantras",
@@ -46,7 +47,6 @@ def get_n8n_service() -> N8nService:
 class MantraCreate(BaseModel):
     name: str
     description: str
-    user_id: str
     workflow_json: Dict[str, Any]
     is_active: bool = True
 
@@ -77,15 +77,8 @@ async def create_mantra(
     """Create a new mantra"""
     try:
         # Check if user is authenticated
-        user = test_session.get("user") if test_session else request.session.get("user")
-        if not user and not test_session:  # Skip auth check in test mode
-            return JSONResponse(
-                content=error_response(
-                    message="Please log in to create a workflow",
-                    code="unauthorized"
-                ),
-                status_code=status.HTTP_401_UNAUTHORIZED
-            )
+        user = get_authenticated_user(request, test_session)
+        user_id = user["id"]
 
         # Validate workflow JSON
         if not isinstance(mantra.workflow_json, dict) or "nodes" not in mantra.workflow_json:
@@ -100,12 +93,12 @@ async def create_mantra(
         # Initialize service
         service = MantraService(db, n8n_service)
 
-        # Create mantra
+        # Create mantra using user ID from session
         mantra_obj = await service.create_mantra(
             name=mantra.name,
             description=mantra.description,
             workflow_json=mantra.workflow_json,
-            user_id=mantra.user_id
+            user_id=user_id
         )
 
         return JSONResponse(
@@ -114,6 +107,14 @@ async def create_mantra(
                 message="Mantra created successfully"
             ),
             status_code=status.HTTP_201_CREATED
+        )
+    except HTTPException as e:
+        return JSONResponse(
+            content=error_response(
+                message=e.detail,
+                code="unauthorized"
+            ),
+            status_code=e.status_code
         )
     except ValueError as e:
         logger.error(f"Validation error in create_mantra: {str(e)}")
@@ -136,13 +137,18 @@ async def create_mantra(
 
 @router.get("/")
 async def list_mantras(
+    request: Request,
     skip: int = Query(0, description="Number of records to skip"),
     limit: int = Query(100, description="Maximum number of records to return"),
     db: Session = Depends(get_db),
-    n8n_service: N8nService = Depends(get_n8n_service)
+    n8n_service: N8nService = Depends(get_n8n_service),
+    test_session: Optional[Dict[str, Any]] = Depends(get_test_session)
 ):
     """List all available mantras"""
     try:
+        # Check if user is authenticated
+        user = get_authenticated_user(request, test_session)
+
         service = MantraService(db, n8n_service)
         mantras = await service.get_mantras(skip, limit)
 
@@ -168,6 +174,14 @@ async def list_mantras(
                     "limit": limit
                 }
             )
+        )
+    except HTTPException as e:
+        return JSONResponse(
+            content=error_response(
+                message=e.detail,
+                code="unauthorized"
+            ),
+            status_code=e.status_code
         )
     except Exception as e:
         logger.error(f"Error listing mantras: {str(e)}")
@@ -307,23 +321,9 @@ async def get_user_mantras(
         service = MantraService(db, n8n_service)
         installations = await service.get_user_installations(user_id)
         
-        # Convert installations to dict with proper UUID and datetime serialization
-        serialized_installations = []
-        for installation in installations:
-            installation_dict = {
-                "id": str(installation.id),
-                "mantra_id": str(installation.mantra_id),
-                "user_id": installation.user_id,
-                "installed_at": installation.installed_at.isoformat() if installation.installed_at else None,
-                "status": installation.status,
-                "config": installation.config,
-                "n8n_workflow_id": installation.n8n_workflow_id,
-                "is_active": installation.is_active,
-                "disconnected_at": installation.disconnected_at.isoformat() if installation.disconnected_at else None
-            }
-            serialized_installations.append(installation_dict)
-            
-        return serialized_installations
+        # The installations are already in dictionary format from the service
+        return installations
+        
     except Exception as e:
         logger.error(f"Error getting user mantras: {str(e)}")
         raise HTTPException(

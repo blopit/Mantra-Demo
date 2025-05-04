@@ -495,6 +495,13 @@
             // Show selected tab
             document.getElementById(`${tabName}-tab`).classList.add('active');
             document.querySelector(`[onclick="switchTab('${tabName}')"]`).classList.add('active');
+
+            // Load data based on tab
+            if (tabName === 'installed') {
+                loadInstalledMantras();
+            } else if (tabName === 'available') {
+                loadAvailableMantras();
+            }
         }
 
         // Load installed mantras
@@ -533,7 +540,10 @@
         async function loadAvailableMantras() {
             try {
                 const response = await fetch('/api/mantras');
-                const mantras = await response.json();
+                const data = await response.json();
+                
+                // Check if the response has the expected structure
+                const mantras = data.data?.mantras || [];
                 
                 const container = document.getElementById('available-mantras');
                 container.innerHTML = mantras.map(mantra => `
@@ -542,11 +552,29 @@
                         <p>${mantra.description}</p>
                         <p style="margin-top: 10px;">
                             <button class="btn btn-primary" data-mantra-id="${mantra.id}" onclick="installWorkflow('${mantra.id}')">Install Mantra</button>
+                            <button class="btn btn-danger" onclick="deleteWorkflow('${mantra.id}')">Delete</button>
                         </p>
                     </div>
                 `).join('');
+
+                // If no mantras available, show a message
+                if (mantras.length === 0) {
+                    container.innerHTML = `
+                        <div class="workflow-card" style="text-align: center;">
+                            <h3>No Mantras Available</h3>
+                            <p>Create a new mantra using the "Create New Mantra" tab.</p>
+                        </div>
+                    `;
+                }
             } catch (error) {
                 console.error('Error loading available mantras:', error);
+                const container = document.getElementById('available-mantras');
+                container.innerHTML = `
+                    <div class="workflow-card" style="text-align: center;">
+                        <h3>Error Loading Mantras</h3>
+                        <p>There was an error loading the available mantras. Please try again later.</p>
+                    </div>
+                `;
             }
         }
 
@@ -796,54 +824,85 @@
                 "nodes": [
                     {
                         "id": "1",
-                        "type": "gmail",
+                        "type": "n8n-nodes-base.webhook",
+                        "name": "Webhook Trigger",
+                        "parameters": {
+                            "path": "onboarding",
+                            "responseMode": "responseNode",
+                            "options": {}
+                        }
+                    },
+                    {
+                        "id": "2",
+                        "type": "n8n-nodes-base.gmail",
                         "name": "Send Email",
                         "parameters": {
                             "operation": "sendEmail",
-                            "to": "${trigger.email}",
+                            "to": "{{'{{$node[\"Webhook Trigger\"].data.email}}'}}",
                             "subject": "Welcome to Mantra!",
                             "text": "Thanks for trying out our workflow automation!"
                         }
                     },
                     {
-                        "id": "2", 
-                        "type": "googleCalendar",
+                        "id": "3", 
+                        "type": "n8n-nodes-base.googleCalendar",
                         "name": "Create Event",
                         "parameters": {
                             "operation": "createEvent",
                             "calendar": "primary",
                             "summary": "Onboarding Call",
                             "description": "Welcome call with new user",
-                            "start": "${trigger.preferredTime}",
-                            "end": "${addHours(trigger.preferredTime, 1)}"
+                            "start": "{{'{{$node[\"Webhook Trigger\"].data.preferredTime}}'}}",
+                            "end": "{{'{{$node[\"Webhook Trigger\"].data.preferredTime + 3600000}}'}}"
+                        }
+                    },
+                    {
+                        "id": "4",
+                        "type": "n8n-nodes-base.googleDrive",
+                        "name": "Create Folder",
+                        "parameters": {
+                            "operation": "createFolder",
+                            "name": "{{'{{$node[\"Webhook Trigger\"].data.company}}'}} Resources",
+                            "parent": "root"
                         }
                     }
                 ],
                 "connections": {
+                    "Webhook Trigger": {
+                        "main": [["Send Email", 0]]
+                    },
                     "Send Email": {
                         "main": [["Create Event", 0]]
+                    },
+                    "Create Event": {
+                        "main": [["Create Folder", 0]]
                     }
                 },
-                "trigger": {
-                    "type": "webhook",
-                    "parameters": {
-                        "email": {"type": "string"},
-                        "preferredTime": {"type": "string", "format": "date-time"}
-                    }
+                "settings": {
+                    "saveExecutionProgress": true,
+                    "saveManualExecutions": true
+                },
+                "triggerParameters": {
+                    "email": {"type": "string", "required": true},
+                    "company": {"type": "string", "required": true},
+                    "preferredTime": {"type": "string", "format": "date-time", "required": true}
                 }
             };
             
-            document.getElementById('workflow-name').value = 'Welcome Email and Calendar Event';
-            document.getElementById('workflow-description').value = 'Sends a welcome email and creates a calendar event for onboarding';
+            document.getElementById('workflow-name').value = 'Onboarding Automation';
+            document.getElementById('workflow-description').value = 'Automates the onboarding process by sending a welcome email, scheduling an onboarding call, and creating a resource folder';
             document.getElementById('workflow-json').value = JSON.stringify(sampleWorkflow, null, 2);
         }
 
         // Initial load
-        window.onload = function() {
-            checkGoogleStatus();
+        document.addEventListener('DOMContentLoaded', function() {
+            // Load initial data
             loadInstalledMantras();
             loadAvailableMantras();
-        };
+            
+            // Check Google connection status
+            checkGoogleStatus();
+        });
 
         async function initiateGoogleSignIn() {
             try {
@@ -877,6 +936,28 @@
             setTimeout(() => {
                 notification.remove();
             }, 5000);
+        }
+
+        // Delete workflow
+        async function deleteWorkflow(mantraId) {
+            if (!confirm('Are you sure you want to delete this mantra? This action cannot be undone.')) return;
+            
+            try {
+                const response = await fetch(`/api/mantras/${mantraId}`, {
+                    method: 'DELETE'
+                });
+                
+                if (response.ok) {
+                    showNotification('success', 'Mantra deleted successfully!');
+                    loadAvailableMantras(); // Refresh the list
+                } else {
+                    const errorData = await response.json();
+                    throw new Error(errorData.detail || 'Failed to delete mantra');
+                }
+            } catch (error) {
+                console.error('Error deleting mantra:', error);
+                showNotification('error', 'Error deleting mantra: ' + error.message);
+            }
         }
     </script>
 </body>

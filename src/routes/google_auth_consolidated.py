@@ -226,6 +226,7 @@ async def google_callback(
             "name": user.name,
             "profile_picture": user.profile_picture
         }
+        request.session["user_id"] = user.id
         logger.info("Stored user in session")
         
         # Check if integration already exists

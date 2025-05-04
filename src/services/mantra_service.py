@@ -156,6 +156,11 @@ class MantraService:
             # Execute query and fetch results
             result = await self.db_session.execute(stmt)
             mantras = result.scalars().all()
+            
+            # Refresh the session to ensure we have fresh data
+            for mantra in mantras:
+                await self.db_session.refresh(mantra)
+                
             return mantras
         except Exception as e:
             logger.error(f"Error in get_mantras: {str(e)}, {type(e)}")
@@ -468,8 +473,8 @@ class MantraService:
                     "n8n_workflow_id": installation.n8n_workflow_id,
                     "status": installation.status,
                     "config": installation.config,
-                    "created_at": installation.created_at,
-                    "updated_at": installation.updated_at,
+                    "installed_at": installation.installed_at,
+                    "disconnected_at": installation.disconnected_at,
                     "mantra": {
                         "id": str(installation.mantra.id),
                         "name": installation.mantra.name,
@@ -524,8 +529,8 @@ class MantraService:
                 "n8n_workflow_id": installation.n8n_workflow_id,
                 "status": installation.status,
                 "config": installation.config,
-                "created_at": installation.created_at,
-                "updated_at": installation.updated_at,
+                "installed_at": installation.installed_at,
+                "disconnected_at": installation.disconnected_at,
                 "mantra": {
                     "id": str(installation.mantra.id),
                     "name": installation.mantra.name,
@@ -627,8 +632,8 @@ class MantraService:
                     "n8n_workflow_id": installation.n8n_workflow_id,
                     "status": installation.status,
                     "config": installation.config,
-                    "created_at": installation.created_at,
-                    "updated_at": installation.updated_at,
+                    "installed_at": installation.installed_at,
+                    "disconnected_at": installation.disconnected_at,
                     "mantra": {
                         "id": str(installation.mantra.id),
                         "name": installation.mantra.name,
