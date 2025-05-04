@@ -59,7 +59,7 @@ class MantraInstallation(Base):
         installed_at (datetime): When the mantra was installed
         status (str): Current status (active, paused, error)
         config (JSON): User-specific configuration for the mantra
-        n8n_workflow_id (Integer): ID of the activated workflow in n8n
+        n8n_workflow_id (str): ID of the activated workflow in n8n (string format)
         is_active (bool): Whether the installation is currently active
         disconnected_at (datetime): When the mantra was uninstalled/deactivated
     
@@ -75,7 +75,7 @@ class MantraInstallation(Base):
     installed_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     status = Column(String, default="active")
     config = Column(JSON)
-    n8n_workflow_id = Column(Integer)
+    n8n_workflow_id = Column(String)
     is_active = Column(Boolean, default=True)
     disconnected_at = Column(DateTime(timezone=True))
     

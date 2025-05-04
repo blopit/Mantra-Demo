@@ -526,8 +526,8 @@
                             <span class="workflow-status status-${mantra.status.toLowerCase()}">${mantra.status}</span>
                         </p>
                         <p style="margin-top: 10px;">
-                            <button class="btn btn-primary" onclick="executeWorkflow('${mantra.installation_id}')">Execute</button>
-                            <button class="btn btn-danger" onclick="uninstallWorkflow('${mantra.installation_id}')">Uninstall</button>
+                            <button class="btn btn-primary" onclick="executeWorkflow('${mantra.id}')">Execute</button>
+                            <button class="btn btn-danger" onclick="uninstallWorkflow('${mantra.id}')">Uninstall</button>
                         </p>
                     </div>
                 `).join('');
@@ -551,7 +551,7 @@
                         <h3>${mantra.name}</h3>
                         <p>${mantra.description}</p>
                         <p style="margin-top: 10px;">
-                            <button class="btn btn-primary" data-mantra-id="${mantra.id}" onclick="installWorkflow('${mantra.id}')">Install Mantra</button>
+                            <button class="btn btn-primary" data-mantra-id="${mantra.id}" onclick="installMantra('${mantra.id}')">Install Mantra</button>
                             <button class="btn btn-danger" onclick="deleteWorkflow('${mantra.id}')">Delete</button>
                         </p>
                     </div>
@@ -653,75 +653,58 @@
             }
         }
 
-        // Install workflow
-        async function installWorkflow(mantraId) {
-            const button = document.querySelector(`[data-mantra-id="${mantraId}"]`);
-            if (!button) {
-                console.error(`Button with data-mantra-id "${mantraId}" not found.`);
-                showNotification('error', 'Could not find the install button.');
-                return; // Exit if button not found
+        // Install mantra
+        async function installMantra(mantraId) {
+            if (!userProfile.id) {
+                alert('Please log in to install mantras');
+                return;
             }
 
-            const originalText = button.textContent; // Store original text *after* checking button exists
-            button.disabled = true;
-            button.textContent = 'Installing...';
-
             try {
-                // Show loading state (moved button update logic above try block)
-                
                 const response = await fetch(`/api/mantras/${mantraId}/install?user_id=${userProfile.id}`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    }
+                    method: 'POST'
                 });
-                
-                const data = await response.json();
-                
-                if (response.ok) {
-                    showNotification('success', 'Mantra installed successfully!');
-                    loadInstalledMantras();
-                    switchTab('installed');
-                } else {
-                    // Handle different error types
-                    let errorMessage = 'Failed to install mantra';
-                    
-                    if (data.detail) {
-                        if (typeof data.detail === 'string') {
-                            errorMessage = data.detail;
-                        } else if (data.detail.message) {
-                            errorMessage = data.detail.message;
+
+                if (response.status === 400 && (await response.text()).includes('already installed')) {
+                    // Mantra is already installed, ask user if they want to reinstall
+                    if (confirm('This mantra is already installed. Would you like to uninstall it and install again?')) {
+                        // Get the existing installation
+                        const installationsResponse = await fetch('/api/mantras/users/' + userProfile.id);
+                        const installations = await installationsResponse.json();
+                        const existingInstallation = installations.find(inst => inst.mantra_id === mantraId);
+                        
+                        if (existingInstallation) {
+                            // Uninstall the existing installation
+                            await fetch(`/api/mantras/installations/${existingInstallation.id}`, {
+                                method: 'DELETE'
+                            });
+                            
+                            // Try installing again
+                            const retryResponse = await fetch(`/api/mantras/${mantraId}/install?user_id=${userProfile.id}`, {
+                                method: 'POST'
+                            });
+                            
+                            if (retryResponse.ok) {
+                                alert('Mantra reinstalled successfully!');
+                                loadInstalledMantras();
+                                return;
+                            } else {
+                                throw new Error('Failed to reinstall mantra');
+                            }
                         }
                     }
-                    
-                    // Check for specific error types
-                    if (response.status === 400) {
-                        if (errorMessage.includes('Invalid workflow format')) {
-                            errorMessage = 'The workflow format is invalid. Please check the workflow configuration.';
-                        } else if (errorMessage.includes('already installed')) {
-                            errorMessage = 'This mantra is already installed for your account.';
-                        }
-                    } else if (response.status === 404) {
-                        errorMessage = 'The mantra could not be found.';
-                    } else if (response.status === 500) {
-                        errorMessage = 'An internal server error occurred. Please try again later.';
-                    }
-                    
-                    showNotification('error', errorMessage);
-                    console.error('Error installing mantra:', {
-                        status: response.status,
-                        data: data
-                    });
+                    return;
                 }
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                alert('Mantra installed successfully!');
+                loadInstalledMantras();
             } catch (error) {
                 console.error('Error installing mantra:', error);
-                showNotification('error', 'Failed to communicate with the server. Please check your connection and try again.');
-            } finally {
-                // Reset button state - No need to query again, use the 'button' variable directly
-                if (button) { // Check still useful in case of unexpected errors before assignment
-                    button.disabled = false;
-                    button.textContent = originalText; // Use the stored original text
-                }
+                alert('Error installing mantra: ' + error.message);
             }
         }
 

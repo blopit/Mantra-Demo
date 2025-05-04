@@ -459,3 +459,71 @@ async def test_workflow_transformation():
             status_code=500,
             detail=f"Error transforming workflow: {str(e)}"
         )
+
+@router.delete("/{mantra_id}")
+async def delete_mantra(
+    request: Request,
+    mantra_id: str,
+    user_id: str = Query(..., description="ID of the user requesting deletion"),
+    db: Session = Depends(get_db),
+    n8n_service: N8nService = Depends(get_n8n_service),
+    test_session: Optional[Dict[str, Any]] = Depends(get_test_session)
+):
+    """Delete a mantra and all its installations.
+    
+    Args:
+        request: The request object
+        mantra_id: The ID of the mantra to delete
+        user_id: The ID of the user requesting deletion
+        db: Database session
+        n8n_service: N8N service instance
+        test_session: Optional test session data
+        
+    Returns:
+        Success response if deletion is successful
+        
+    Raises:
+        HTTPException: If deletion fails or user doesn't have permission
+    """
+    try:
+        # Check if user is authenticated
+        auth_user = get_authenticated_user(request, test_session)
+        
+        # Verify the authenticated user matches the requested user_id
+        if auth_user["id"] != user_id:
+            return JSONResponse(
+                content=error_response(
+                    message="Unauthorized: User ID mismatch",
+                    code="unauthorized"
+                ),
+                status_code=status.HTTP_403_FORBIDDEN
+            )
+        
+        # Initialize service and delete mantra
+        service = MantraService(db, n8n_service)
+        await service.delete_mantra(mantra_id=mantra_id, user_id=user_id)
+        
+        return JSONResponse(
+            content=success_response(
+                message="Mantra deleted successfully"
+            ),
+            status_code=status.HTTP_200_OK
+        )
+        
+    except HTTPException as e:
+        return JSONResponse(
+            content=error_response(
+                message=e.detail,
+                code="error"
+            ),
+            status_code=e.status_code
+        )
+    except Exception as e:
+        logger.error(f"Error deleting mantra: {str(e)}")
+        return JSONResponse(
+            content=error_response(
+                message=f"Error deleting mantra: {str(e)}",
+                code="server_error"
+            ),
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
