@@ -49,7 +49,7 @@ async def test_install_mantra_success(mantra_service, sample_mantra, mock_n8n_se
     """Test successful mantra installation."""
     # Setup
     user_id = "test-user-id"
-    mock_n8n_service.create_workflow.return_value = {"id": "n8n-workflow-id"}
+    mock_n8n_service.create_workflow.return_value = {"id": 123}
     mock_n8n_service.activate_workflow.return_value = True
     
     # Mock database queries
@@ -69,11 +69,11 @@ async def test_install_mantra_success(mantra_service, sample_mantra, mock_n8n_se
     assert result.mantra_id == sample_mantra.id
     assert result.user_id == user_id
     assert result.status == "active"
-    assert result.n8n_workflow_id == "n8n-workflow-id"
+    assert result.n8n_workflow_id == 123
     
     # Verify N8N service calls
     mock_n8n_service.create_workflow.assert_awaited_once_with(sample_mantra.workflow_json)
-    mock_n8n_service.activate_workflow.assert_awaited_once_with("n8n-workflow-id")
+    mock_n8n_service.activate_workflow.assert_awaited_once_with(123)
 
 @pytest.mark.asyncio
 async def test_install_mantra_already_installed(mantra_service, sample_mantra, mock_db_session):
@@ -128,4 +128,68 @@ async def test_install_mantra_n8n_error(mantra_service, sample_mantra, mock_n8n_
     
     # Verify N8N service calls
     mock_n8n_service.create_workflow.assert_awaited_once_with(sample_mantra.workflow_json)
-    mock_n8n_service.activate_workflow.assert_not_called() 
+    mock_n8n_service.activate_workflow.assert_not_called()
+
+@pytest.mark.asyncio
+async def test_delete_mantra_success(mantra_service, sample_mantra, mock_db_session):
+    """Test successful mantra deletion."""
+    # Setup
+    user_id = "test-user-id"
+    installation = MantraInstallation(
+        id="test-installation-id",
+        mantra_id=sample_mantra.id,
+        user_id=user_id,
+        installed_at=datetime.utcnow(),
+        status="active",
+        n8n_workflow_id=123,
+        is_active=True
+    )
+    
+    # Mock database queries
+    mock_db_session.execute.return_value.scalar_one_or_none.side_effect = [
+        sample_mantra,  # First call returns the mantra
+        installation  # Second call returns the installation
+    ]
+    mock_db_session.execute.return_value.scalars.return_value.all.return_value = [installation]
+    
+    # Execute
+    await mantra_service.delete_mantra(
+        mantra_id=sample_mantra.id,
+        user_id=user_id
+    )
+    
+    # Assert
+    assert not sample_mantra.is_active
+    mock_db_session.commit.assert_awaited_once()
+
+@pytest.mark.asyncio
+async def test_delete_mantra_not_found(mantra_service, mock_db_session):
+    """Test mantra deletion when mantra doesn't exist."""
+    # Setup
+    user_id = "test-user-id"
+    mock_db_session.execute.return_value.scalar_one_or_none.return_value = None
+    
+    # Execute & Assert
+    with pytest.raises(HTTPException) as exc_info:
+        await mantra_service.delete_mantra(
+            mantra_id="non-existent-id",
+            user_id=user_id
+        )
+    assert exc_info.value.status_code == 404
+    assert "not found" in exc_info.value.detail
+
+@pytest.mark.asyncio
+async def test_delete_mantra_unauthorized(mantra_service, sample_mantra, mock_db_session):
+    """Test mantra deletion by non-creator user."""
+    # Setup
+    user_id = "different-user-id"  # Different from sample_mantra.user_id
+    mock_db_session.execute.return_value.scalar_one_or_none.return_value = sample_mantra
+    
+    # Execute & Assert
+    with pytest.raises(HTTPException) as exc_info:
+        await mantra_service.delete_mantra(
+            mantra_id=sample_mantra.id,
+            user_id=user_id
+        )
+    assert exc_info.value.status_code == 403
+    assert "Only the creator" in exc_info.value.detail 

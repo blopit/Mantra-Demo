@@ -581,7 +581,7 @@ class N8nService:
                         raise HTTPException(status_code=e.response.status_code, detail=f"n8n API error: {e.response.text}")
                 await asyncio.sleep(self.retry_delay * (2 ** attempt))
 
-    async def activate_workflow(self, workflow_id: int) -> None:
+    async def activate_workflow(self, workflow_id: Union[str, int]) -> None:
         """Activate a workflow in n8n.
         
         Args:
@@ -591,56 +591,91 @@ class N8nService:
             HTTPException: If workflow activation fails
         """
         try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{self.api_url}/workflows/{workflow_id}/activate",
-                    headers=self.headers,
-                    timeout=self.timeout
-                )
-                
-                if response.status_code == 400:
-                    error_detail = None
-                    try:
-                        error_json = response.json()
-                        if isinstance(error_json, dict):
-                            error_detail = error_json.get('message', error_json)
-                    except:
-                        error_detail = response.text
-                    
-                    logger.error(f"N8N API returned 400 error: {error_detail}")
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"Failed to activate workflow: {error_detail}"
-                    )
-                
-                response.raise_for_status()
-                logger.info(f"Successfully activated workflow {workflow_id}")
-        except httpx.HTTPError as e:
-            logger.error(f"Error activating n8n workflow {workflow_id}: {e}")
-            if isinstance(e, httpx.HTTPStatusError):
-                status_code = e.response.status_code
-                error_detail = None
-                try:
-                    error_json = e.response.json()
-                    if isinstance(error_json, dict):
-                        error_detail = error_json.get('message', error_json)
-                except:
-                    error_detail = e.response.text
-                
+            # First check if workflow exists and get its current state
+            workflow = await self.get_workflow(workflow_id)
+            if not workflow:
                 raise HTTPException(
-                    status_code=status_code,
-                    detail=f"Failed to activate workflow: {error_detail}"
+                    status_code=404,
+                    detail=f"Workflow {workflow_id} not found"
                 )
+            
+            # If already active, no need to activate again
+            if workflow.get("active", False):
+                logger.info(f"Workflow {workflow_id} is already active")
+                return
+            
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                for attempt in range(self.max_retries):
+                    try:
+                        response = await client.post(
+                            f"{self.api_url}/workflows/{workflow_id}/activate",
+                            headers=self.headers
+                        )
+                        
+                        if response.status_code == 400:
+                            error_detail = None
+                            try:
+                                error_json = response.json()
+                                if isinstance(error_json, dict):
+                                    error_detail = error_json.get('message', error_json)
+                            except:
+                                error_detail = response.text
+                            
+                            logger.error(f"N8N API returned 400 error: {error_detail}")
+                            raise HTTPException(
+                                status_code=400,
+                                detail=f"Failed to activate workflow: {error_detail}"
+                            )
+                        
+                        response.raise_for_status()
+                        logger.info(f"Successfully activated workflow {workflow_id}")
+                        return
+                        
+                    except httpx.HTTPError as e:
+                        if isinstance(e, httpx.HTTPStatusError):
+                            if e.response.status_code == 404:
+                                raise HTTPException(
+                                    status_code=404,
+                                    detail=f"Workflow {workflow_id} not found"
+                                )
+                            elif e.response.status_code == 400:
+                                error_detail = None
+                                try:
+                                    error_json = e.response.json()
+                                    if isinstance(error_json, dict):
+                                        error_detail = error_json.get('message', error_json)
+                                except:
+                                    error_detail = e.response.text
+                                
+                                raise HTTPException(
+                                    status_code=400,
+                                    detail=f"Failed to activate workflow: {error_detail}"
+                                )
+                        
+                        if attempt == self.max_retries - 1:
+                            logger.error(f"Failed to activate workflow {workflow_id} after {self.max_retries} attempts: {str(e)}")
+                            raise HTTPException(
+                                status_code=500,
+                                detail=f"Failed to activate workflow after {self.max_retries} attempts: {str(e)}"
+                            )
+                        
+                        await asyncio.sleep(self.retry_delay * (2 ** attempt))
+                        continue
+                        
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error activating workflow {workflow_id}: {str(e)}")
             raise HTTPException(
                 status_code=500,
-                detail=f"Failed to activate workflow: {str(e)}"
+                detail=f"Error activating workflow: {str(e)}"
             )
     
-    async def deactivate_workflow(self, workflow_id: int) -> None:
+    async def deactivate_workflow(self, workflow_id: Union[str, int]) -> None:
         """Deactivate a workflow in n8n.
         
         Args:
-            workflow_id: The ID of the workflow to deactivate
+            workflow_id: The ID of the workflow to deactivate (can be string or integer)
             
         Raises:
             HTTPException: If workflow deactivation fails
@@ -691,11 +726,11 @@ class N8nService:
                 detail=f"Failed to deactivate workflow: {str(e)}"
             )
     
-    async def delete_workflow(self, workflow_id: int) -> None:
+    async def delete_workflow(self, workflow_id: Union[str, int]) -> None:
         """Delete a workflow from n8n.
         
         Args:
-            workflow_id: The ID of the workflow to delete
+            workflow_id: The ID of the workflow to delete (can be string or integer)
             
         Raises:
             HTTPException: If workflow deletion fails
@@ -746,7 +781,77 @@ class N8nService:
                 detail=f"Failed to delete workflow: {str(e)}"
             )
     
-    async def execute_workflow(self, workflow_id: int, data: Dict[str, Any]) -> Dict[str, Any]:
+    async def get_webhook_url(self, workflow_id: Union[str, int]) -> Optional[str]:
+        """Get the webhook URL for a workflow if it has a webhook trigger node.
+        
+        Args:
+            workflow_id: The ID of the workflow
+            
+        Returns:
+            The webhook URL if found, None otherwise
+        """
+        try:
+            workflow = await self.get_workflow(workflow_id)
+            if not workflow:
+                logger.warning(f"Workflow {workflow_id} not found when getting webhook URL")
+                return None
+            
+            logger.debug(f"Retrieved workflow configuration for {workflow_id}: {json.dumps(workflow, indent=2)}")
+            
+            # Check if workflow has webhook trigger node
+            webhook_nodes = [
+                node for node in workflow.get('nodes', [])
+                if node.get('type') == 'n8n-nodes-base.webhook'
+            ]
+            
+            if not webhook_nodes:
+                logger.warning(f"No webhook nodes found in workflow {workflow_id}. Available nodes: {[node.get('type') for node in workflow.get('nodes', [])]}")
+                return None
+            
+            # Get the first webhook node (n8n typically only uses one webhook trigger)
+            webhook_node = webhook_nodes[0]
+            logger.debug(f"Found webhook node in workflow {workflow_id}: {json.dumps(webhook_node, indent=2)}")
+            
+            # Get webhook path from parameters, checking all possible locations
+            parameters = webhook_node.get('parameters', {})
+            logger.debug(f"Webhook node parameters for workflow {workflow_id}: {json.dumps(parameters, indent=2)}")
+            
+            # Check different possible parameter paths for the webhook path
+            webhook_path = None
+            path_locations = {
+                'path': parameters.get('path'),
+                'endpoint': parameters.get('endpoint'),
+                'webhookEndpoint': parameters.get('webhookEndpoint'),
+                'options.path': parameters.get('options', {}).get('path')
+            }
+            
+            # Log all potential path locations
+            logger.debug(f"Checking webhook path locations for workflow {workflow_id}: {json.dumps(path_locations, indent=2)}")
+            
+            for location, value in path_locations.items():
+                if value:
+                    webhook_path = value
+                    logger.info(f"Found webhook path in '{location}' parameter: {value}")
+                    break
+            
+            if not webhook_path:
+                webhook_path = 'webhook'
+                logger.warning(f"No webhook path found in any location, using default: {webhook_path}")
+            
+            webhook_path = webhook_path.lstrip('/')  # Remove leading slash if present
+            
+            # Construct webhook URL using the base URL without /api/v1
+            base_url = self.api_url.replace('/api/v1', '')
+            webhook_url = f"{base_url}/webhook/{workflow_id}/{webhook_path}"
+            
+            logger.info(f"Generated webhook URL for workflow {workflow_id}: {webhook_url}")
+            return webhook_url
+            
+        except Exception as e:
+            logger.error(f"Error getting webhook URL for workflow {workflow_id}: {str(e)}", exc_info=True)
+            return None
+
+    async def execute_workflow(self, workflow_id: Union[str, int], data: Dict[str, Any]) -> Dict[str, Any]:
         """Execute a workflow with the given data.
         
         Args:
@@ -760,15 +865,67 @@ class N8nService:
             HTTPException: If workflow execution fails
         """
         try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{self.api_url}/workflows/{workflow_id}/execute",
-                    headers=self.headers,
-                    json=data,
-                    timeout=self.timeout
+            # First check if workflow exists and get its current state
+            workflow = await self.get_workflow(workflow_id)
+            if not workflow:
+                logger.error(f"Workflow {workflow_id} not found")
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Workflow {workflow_id} not found"
                 )
+            
+            logger.info(f"Retrieved workflow {workflow_id} configuration: {json.dumps(workflow, indent=2)}")
+            
+            # If not active, activate it first
+            if not workflow.get("active", False):
+                logger.info(f"Activating workflow {workflow_id}")
+                await self.activate_workflow(workflow_id)
+            else:
+                logger.info(f"Workflow {workflow_id} is already active")
+            
+            # Check if this is a webhook-triggered workflow
+            webhook_url = await self.get_webhook_url(workflow_id)
+            
+            if webhook_url:
+                logger.info(f"Executing webhook-triggered workflow {workflow_id} at URL: {webhook_url}")
+                logger.debug(f"Webhook request data: {json.dumps(data, indent=2)}")
+            else:
+                logger.info(f"Executing regular workflow {workflow_id} via execute endpoint")
+            
+            async with httpx.AsyncClient() as client:
+                if webhook_url:
+                    # For webhook-triggered workflows, send request to webhook URL
+                    logger.info(f"Sending POST request to webhook URL: {webhook_url}")
+                    response = await client.post(
+                        webhook_url,
+                        json=data,  # Send data directly without wrapping
+                        timeout=self.timeout
+                    )
+                    logger.debug(f"Webhook response status: {response.status_code}")
+                    logger.debug(f"Webhook response headers: {dict(response.headers)}")
+                    logger.debug(f"Webhook response body: {response.text}")
+                else:
+                    # For regular workflows, use execute endpoint
+                    execute_url = f"{self.api_url}/workflows/{workflow_id}/execute"
+                    logger.info(f"Sending POST request to execute URL: {execute_url}")
+                    response = await client.post(
+                        execute_url,
+                        headers=self.headers,
+                        json={"data": data},
+                        timeout=self.timeout
+                    )
+                    logger.debug(f"Execute response status: {response.status_code}")
+                    logger.debug(f"Execute response headers: {dict(response.headers)}")
+                    logger.debug(f"Execute response body: {response.text}")
                 
-                if response.status_code == 400:
+                if response.status_code == 404:
+                    error_msg = f"Endpoint not found: {webhook_url if webhook_url else execute_url}"
+                    logger.error(error_msg)
+                    raise HTTPException(
+                        status_code=404,
+                        detail=error_msg
+                    )
+                elif response.status_code == 400:
                     error_detail = None
                     try:
                         error_json = response.json()
@@ -777,22 +934,48 @@ class N8nService:
                     except:
                         error_detail = response.text
                     
-                    logger.error(f"N8N API returned 400 error: {error_detail}")
+                    error_msg = f"Bad request executing workflow: {error_detail}"
+                    logger.error(error_msg)
                     raise HTTPException(
                         status_code=400,
-                        detail=f"Failed to execute workflow: {error_detail}"
+                        detail=error_msg
                     )
                 
                 response.raise_for_status()
                 result = response.json()
                 
                 if not isinstance(result, dict):
-                    raise ValueError("Invalid response from n8n API: not a JSON object")
+                    error_msg = "Invalid response from n8n API: not a JSON object"
+                    logger.error(error_msg)
+                    raise ValueError(error_msg)
                 
-                logger.info(f"Successfully executed workflow {workflow_id}")
-                return result
+                logger.debug(f"Workflow execution result: {json.dumps(result, indent=2)}")
+                
+                # n8n returns the result in a specific format
+                if "data" in result:
+                    # Success case - return the data
+                    logger.info(f"Successfully executed workflow {workflow_id}")
+                    return {
+                        "success": True,
+                        "execution_id": result.get("executionId"),
+                        "data": result.get("data")
+                    }
+                elif "error" in result:
+                    # Error case - raise exception with error details
+                    error_message = result["error"].get("message", str(result["error"]))
+                    logger.error(f"Workflow execution failed: {error_message}")
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"Workflow execution failed: {error_message}"
+                    )
+                else:
+                    # Unexpected response format
+                    error_msg = f"Unexpected response format from n8n: {result}"
+                    logger.error(error_msg)
+                    raise ValueError(error_msg)
+            
         except httpx.HTTPError as e:
-            logger.error(f"Error executing n8n workflow {workflow_id}: {e}")
+            logger.error(f"HTTP error executing n8n workflow {workflow_id}: {str(e)}", exc_info=True)
             if isinstance(e, httpx.HTTPStatusError):
                 status_code = e.response.status_code
                 error_detail = None
@@ -803,23 +986,70 @@ class N8nService:
                 except:
                     error_detail = e.response.text
                 
+                error_msg = f"Failed to execute workflow: {error_detail}"
+                logger.error(error_msg)
                 raise HTTPException(
                     status_code=status_code,
-                    detail=f"Failed to execute workflow: {error_detail}"
-                )
+                    detail=error_msg
+                ) from e
+            
+            error_msg = f"Failed to execute workflow: {str(e)}"
+            logger.error(error_msg)
             raise HTTPException(
                 status_code=500,
-                detail=f"Failed to execute workflow: {str(e)}"
-            )
+                detail=error_msg
+            ) from e
         except ValueError as e:
-            logger.error(f"Invalid response from n8n API: {str(e)}")
+            error_msg = f"Invalid response from n8n API: {str(e)}"
+            logger.error(error_msg)
             raise HTTPException(
                 status_code=500,
-                detail=str(e)
+                detail=error_msg
+            ) from e
+        except Exception as e:
+            error_msg = f"Unexpected error executing workflow: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            raise HTTPException(
+                status_code=500,
+                detail=error_msg
+            ) from e
+
+    async def get_workflow(self, workflow_id: str) -> Optional[Dict[str, Any]]:
+        """Get a workflow from n8n.
+        
+        Args:
+            workflow_id: The ID of the workflow to get
+            
+        Returns:
+            The workflow data if found, None if not found
+            
+        Raises:
+            HTTPException: If the request fails
+        """
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    f"{self.api_url}/workflows/{workflow_id}",
+                    headers=self.headers
+                )
+                
+                if response.status_code == 404:
+                    return None
+                
+                response.raise_for_status()
+                return response.json()
+                
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                return None
+            logger.error(f"HTTP error getting n8n workflow {workflow_id}: {str(e)}")
+            raise HTTPException(
+                status_code=e.response.status_code,
+                detail=f"Error getting n8n workflow: {str(e)}"
             )
         except Exception as e:
-            logger.error(f"Unexpected error executing workflow: {str(e)}")
+            logger.error(f"Error getting n8n workflow {workflow_id}: {str(e)}")
             raise HTTPException(
                 status_code=500,
-                detail=f"Failed to execute workflow: {str(e)}"
+                detail=f"Error getting n8n workflow: {str(e)}"
             ) 

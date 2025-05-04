@@ -10,7 +10,7 @@ This module handles the logic for:
 
 import json
 import logging
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Union
 from fastapi import Depends, HTTPException, status
 import requests
 from sqlalchemy.orm import Session
@@ -439,7 +439,7 @@ class N8nConversionService:
             logger.error(f"Failed to create workflow in n8n: {e}")
             raise HTTPException(status_code=500, detail=f"n8n workflow creation failed: {e}")
 
-    def activate_workflow_in_n8n(self, workflow_id: int) -> bool:
+    def activate_workflow_in_n8n(self, workflow_id: Union[str, int]) -> bool:
         """
         Activate a workflow in n8n by ID.
         Returns True if successful.
@@ -456,7 +456,7 @@ class N8nConversionService:
             logger.error(f"Failed to activate workflow {workflow_id} in n8n: {e}")
             raise HTTPException(status_code=500, detail=f"n8n workflow activation failed: {e}")
 
-    def deactivate_workflow_in_n8n(self, workflow_id: int) -> bool:
+    def deactivate_workflow_in_n8n(self, workflow_id: Union[str, int]) -> bool:
         """
         Deactivate a workflow in n8n by ID.
         Returns True if successful.

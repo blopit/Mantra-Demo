@@ -13,6 +13,7 @@ from unittest.mock import patch, AsyncMock
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 import json
+from sqlalchemy import and_
 
 from src.models.mantra import Mantra, MantraInstallation
 from src.services.n8n_service import N8nService
@@ -52,7 +53,7 @@ async def test_mantra(db_session: AsyncSession, test_user) -> Mantra:
         workflow_json={
             "nodes": [
                 {
-                    "id": "1",
+                    "id": 1,  # Use integer ID
                     "type": "gmail",
                     "name": "Send Email",
                     "parameters": {
@@ -160,7 +161,7 @@ async def test_execute_mantra_workflow(client, test_mantra, test_user, db_sessio
     installation = MantraInstallation(
         mantra_id=test_mantra.id,
         user_id=test_mantra.user_id,
-        n8n_workflow_id=123,
+        n8n_workflow_id=123,  # Use integer ID
         status="active"
     )
     db_session.add(installation)
@@ -225,4 +226,58 @@ async def test_error_handling_flows(client, test_mantra, mock_n8n_service):
         json={}
     )
     assert response.status_code == 400
-    assert "Invalid workflow format" in response.json()["detail"] 
+    assert "Invalid workflow format" in response.json()["detail"]
+
+@pytest.mark.asyncio
+async def test_delete_mantra(client, test_mantra, test_user, db_session, mock_n8n_service):
+    """Test deleting a mantra."""
+    # Create an installation first
+    installation = MantraInstallation(
+        mantra_id=test_mantra.id,
+        user_id=test_user.id,
+        n8n_workflow_id=123,
+        status="active",
+        is_active=True
+    )
+    db_session.add(installation)
+    await db_session.commit()
+    await db_session.refresh(installation)
+
+    # Set session data using cookies
+    session_data = {
+        "user": {
+            "id": str(test_user.id),
+            "email": test_user.email,
+            "name": test_user.name
+        }
+    }
+    client.cookies.set("session", json.dumps(session_data))
+
+    # Delete mantra
+    response = client.delete(
+        f"/api/mantras/{test_mantra.id}?user_id={test_user.id}"
+    )
+    assert response.status_code == 200
+
+    # Verify mantra is marked as inactive
+    result = await db_session.execute(
+        select(Mantra).where(Mantra.id == test_mantra.id)
+    )
+    mantra = result.scalar_one_or_none()
+    assert mantra is not None
+    assert not mantra.is_active
+
+    # Verify installation is removed
+    result = await db_session.execute(
+        select(MantraInstallation).where(
+            and_(
+                MantraInstallation.mantra_id == test_mantra.id,
+                MantraInstallation.is_active == True
+            )
+        )
+    )
+    active_installations = result.scalars().all()
+    assert len(active_installations) == 0
+
+    # Verify n8n workflow was deleted
+    mock_n8n_service.delete_workflow.assert_called_with(123) 

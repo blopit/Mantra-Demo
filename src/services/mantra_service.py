@@ -5,6 +5,7 @@ This module handles the logic for:
 - Listing available mantras
 - Installing mantras for users
 - Managing mantra installations
+- Deleting mantras
 """
 
 import json
@@ -264,64 +265,47 @@ class MantraService:
             # Get workflow data from mantra
             workflow_data = mantra.workflow_json
             
+            # Create workflow in n8n
             try:
-                # Check if workflow contains Google service nodes and transform if needed
-                contains_google_nodes = False
-                google_service_types = ['gmail', 'googlecalendar', 'googledrive', 'googlesheets']
+                # Create the workflow
+                n8n_workflow = await self.n8n_service.create_workflow(workflow_data)
+                n8n_workflow_id = n8n_workflow["id"]  # Use string ID directly
+                if not n8n_workflow_id:
+                    raise ValueError("No workflow ID returned by n8n")
                 
-                for node in workflow_data.get('nodes', []):
-                    if node.get('type', '').lower() in google_service_types:
-                        contains_google_nodes = True
-                        break
-                
-                # Transform workflow if it contains Google service nodes
-                if contains_google_nodes:
-                    logger.info("Workflow contains Google service nodes. Applying transformation.")
-                    transformer = GoogleWorkflowTransformer()
-                    workflow_data = transformer.transform_workflow(workflow_data)
-            
-                # Create workflow in n8n
-                logger.info(f"Creating n8n workflow for mantra {mantra_id}")
-                logger.debug(f"Workflow JSON content: {workflow_data}")
-
-                n8n_result = await self.n8n_service.create_workflow(workflow_data)
-                logger.debug(f"n8n workflow creation result: {n8n_result}")
-
-                # Handle both integer and dictionary response formats
-                n8n_workflow_id = n8n_result["id"] if isinstance(n8n_result, dict) else n8n_result
-                logger.info(f"Created n8n workflow with ID: {n8n_workflow_id}")
-
                 # Activate the workflow
-                logger.info(f"Activating n8n workflow {n8n_workflow_id}")
                 await self.n8n_service.activate_workflow(n8n_workflow_id)
-                logger.info(f"Successfully activated n8n workflow {n8n_workflow_id}")
+                logger.info(f"Activated n8n workflow {n8n_workflow_id}")
                 
-                # Create installation record
-                installation = MantraInstallation(
-                    mantra_id=mantra_id,
-                    user_id=user_id,
-                    n8n_workflow_id=n8n_workflow_id,
-                    config=config or {},
-                    status="active",
-                    is_active=True
-                )
-                
-                self.db_session.add(installation)
-                await self.db_session.commit()
-                await self.db_session.refresh(installation)
-                
-                return installation
-                
-            except HTTPException as e:
-                # Re-raise HTTP exceptions
-                raise e
             except Exception as e:
-                logger.error(f"Error installing mantra: {str(e)}")
+                logger.error(f"Error setting up n8n workflow: {str(e)}")
+                # Clean up workflow if it was created
+                if 'n8n_workflow_id' in locals():
+                    try:
+                        await self.n8n_service.delete_workflow(n8n_workflow_id)
+                    except Exception as cleanup_error:
+                        logger.warning(f"Failed to clean up workflow after error: {str(cleanup_error)}")
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail=f"Error installing mantra: {str(e)}"
+                    detail=f"Error setting up n8n workflow: {str(e)}"
                 )
-                
+            
+            # Create installation record
+            installation = MantraInstallation(
+                mantra_id=mantra_id,
+                user_id=user_id,
+                n8n_workflow_id=n8n_workflow_id,  # Store string ID
+                config=config or {},
+                status="active",
+                is_active=True
+            )
+            
+            self.db_session.add(installation)
+            await self.db_session.commit()
+            await self.db_session.refresh(installation)
+            
+            return installation
+            
         except HTTPException:
             raise
         except Exception as e:
@@ -362,17 +346,21 @@ class MantraService:
             
             # Deactivate workflow in n8n
             try:
-                await self.n8n_service.deactivate_workflow(installation.n8n_workflow_id)
-                logger.info(f"Deactivated n8n workflow {installation.n8n_workflow_id}")
+                if installation.n8n_workflow_id:
+                    try:
+                        await self.n8n_service.deactivate_workflow(installation.n8n_workflow_id)
+                        logger.info(f"Deactivated n8n workflow {installation.n8n_workflow_id}")
+                    except Exception as e:
+                        logger.warning(f"Failed to deactivate n8n workflow: {str(e)}")
+                    
+                    try:
+                        await self.n8n_service.delete_workflow(installation.n8n_workflow_id)
+                        logger.info(f"Deleted n8n workflow {installation.n8n_workflow_id}")
+                    except Exception as e:
+                        logger.warning(f"Failed to delete n8n workflow: {str(e)}")
             except Exception as e:
-                logger.warning(f"Failed to deactivate n8n workflow: {str(e)}")
-            
-            # Delete workflow from n8n
-            try:
-                await self.n8n_service.delete_workflow(installation.n8n_workflow_id)
-                logger.info(f"Deleted n8n workflow {installation.n8n_workflow_id}")
-            except Exception as e:
-                logger.warning(f"Failed to delete n8n workflow: {str(e)}")
+                logger.warning(f"Error during n8n workflow cleanup: {str(e)}")
+                # Continue with installation cleanup even if n8n operations fail
             
             # Mark installation as inactive
             installation.is_active = False
@@ -439,20 +427,20 @@ class MantraService:
                 detail=f"Error updating mantra status: {str(e)}"
             )
     
-    async def get_user_installations(self, user_id: str) -> List[MantraInstallation]:
+    async def get_user_installations(self, user_id: str) -> List[Dict[str, Any]]:
         """Get all active mantra installations for a user.
         
         Args:
             user_id: The ID of the user
             
         Returns:
-            List of MantraInstallation objects
+            List of installation dictionaries
             
         Raises:
             HTTPException: If query fails
         """
         try:
-            # Get all active installations for the user
+            # Get all active installations with their related mantras
             result = await self.db_session.execute(
                 select(MantraInstallation)
                 .options(selectinload(MantraInstallation.mantra))
@@ -466,23 +454,31 @@ class MantraService:
             installations = result.scalars().all()
             
             # Convert to dictionary format
-            return [
-                {
+            installation_list = []
+            for installation in installations:
+                installation_dict = {
                     "id": str(installation.id),
                     "mantra_id": str(installation.mantra_id),
+                    "user_id": installation.user_id,
                     "n8n_workflow_id": installation.n8n_workflow_id,
                     "status": installation.status,
                     "config": installation.config,
-                    "installed_at": installation.installed_at,
-                    "disconnected_at": installation.disconnected_at,
-                    "mantra": {
+                    "installed_at": installation.installed_at.isoformat() if installation.installed_at else None,
+                    "disconnected_at": installation.disconnected_at.isoformat() if installation.disconnected_at else None
+                }
+                
+                # Add mantra details if available
+                if installation.mantra:
+                    installation_dict["mantra"] = {
                         "id": str(installation.mantra.id),
                         "name": installation.mantra.name,
-                        "description": installation.mantra.description
-                    } if installation.mantra else None
-                }
-                for installation in installations
-            ]
+                        "description": installation.mantra.description,
+                        "workflow_json": installation.mantra.workflow_json
+                    }
+                
+                installation_list.append(installation_dict)
+            
+            return installation_list
             
         except Exception as e:
             logger.error(f"Error getting user installations: {str(e)}")
@@ -547,42 +543,40 @@ class MantraService:
                 detail=f"Error getting installation: {str(e)}"
             )
     
-    async def execute_mantra_workflow(self, installation_id: Union[str, UUID], data: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute_mantra_workflow(self, installation_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
         """Execute a mantra workflow.
         
         Args:
-            installation_id: The ID of the mantra installation (can be string or UUID)
+            installation_id: The ID of the mantra installation
             data: The input data for the workflow
             
         Returns:
-            Result of the workflow execution
+            The result of the workflow execution
             
         Raises:
-            HTTPException: If execution fails
+            HTTPException: If workflow execution fails
         """
         try:
-            # Convert string to UUID if needed
-            if isinstance(installation_id, str):
-                installation_id = UUID(installation_id)
-            
             # Get the installation
-            result = await self.db_session.execute(
-                select(MantraInstallation)
-                .options(selectinload(MantraInstallation.mantra))
-                .where(MantraInstallation.id == installation_id)
-            )
-            installation = result.scalar_one_or_none()
-            
+            installation = await self.get_installation(installation_id)
             if not installation:
                 raise HTTPException(
                     status_code=404,
                     detail=f"Installation {installation_id} not found"
                 )
             
+            # Get the workflow ID
+            workflow_id = installation.get("n8n_workflow_id")
+            if not workflow_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Installation has no associated n8n workflow"
+                )
+            
             # Execute workflow
             try:
                 result = await self.n8n_service.execute_workflow(
-                    installation.n8n_workflow_id,
+                    workflow_id,  # Use string ID
                     data
                 )
                 return {
@@ -590,6 +584,28 @@ class MantraService:
                     "execution_id": result.get("execution_id"),
                     "output": result.get("data", {})
                 }
+            except HTTPException as e:
+                if e.status_code == 404:
+                    # If execution fails with 404, try to reactivate the workflow
+                    try:
+                        await self.n8n_service.activate_workflow(workflow_id)
+                        # Retry execution after reactivation
+                        result = await self.n8n_service.execute_workflow(
+                            workflow_id,
+                            data
+                        )
+                        return {
+                            "success": True,
+                            "execution_id": result.get("execution_id"),
+                            "output": result.get("data", {})
+                        }
+                    except Exception as retry_e:
+                        logger.error(f"Error executing workflow after reactivation: {str(retry_e)}")
+                        raise HTTPException(
+                            status_code=500,
+                            detail=f"Error executing workflow after reactivation: {str(retry_e)}"
+                        )
+                raise e
             except Exception as e:
                 logger.error(f"Error executing n8n workflow: {str(e)}")
                 raise HTTPException(
@@ -602,7 +618,7 @@ class MantraService:
             logger.error(f"Error executing mantra workflow: {str(e)}")
             raise HTTPException(
                 status_code=500,
-                detail=f"Error executing mantra workflow: {str(e)}"
+                detail=f"Error executing workflow: {str(e)}"
             )
     
     async def list_installed_mantras(self) -> List[MantraInstallation]:
@@ -648,4 +664,74 @@ class MantraService:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Error listing installed mantras: {str(e)}"
+            )
+    
+    async def delete_mantra(self, mantra_id: Union[str, UUID], user_id: str) -> None:
+        """Delete a mantra and all its installations.
+        
+        Args:
+            mantra_id: The ID of the mantra to delete
+            user_id: The ID of the user requesting deletion
+            
+        Raises:
+            HTTPException: If deletion fails or user doesn't have permission
+        """
+        try:
+            # Convert string to UUID if needed
+            if isinstance(mantra_id, str):
+                mantra_id = UUID(mantra_id)
+            
+            # Get the mantra
+            result = await self.db_session.execute(
+                select(Mantra).where(Mantra.id == mantra_id)
+            )
+            mantra = result.scalar_one_or_none()
+            
+            if not mantra:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Mantra with ID {mantra_id} not found"
+                )
+            
+            # Check if user has permission to delete (must be creator)
+            if mantra.user_id != user_id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Only the creator can delete a mantra"
+                )
+            
+            # Get all active installations
+            result = await self.db_session.execute(
+                select(MantraInstallation)
+                .where(
+                    and_(
+                        MantraInstallation.mantra_id == mantra_id,
+                        MantraInstallation.is_active == True
+                    )
+                )
+            )
+            installations = result.scalars().all()
+            
+            # Uninstall all active installations
+            for installation in installations:
+                try:
+                    await self.uninstall_mantra(str(installation.id), installation.user_id)
+                except Exception as e:
+                    logger.warning(f"Failed to uninstall mantra installation {installation.id}: {str(e)}")
+            
+            # Mark mantra as inactive (soft delete)
+            mantra.is_active = False
+            mantra.updated_at = datetime.utcnow()
+            
+            await self.db_session.commit()
+            
+            logger.info(f"Successfully deleted mantra {mantra_id}")
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error deleting mantra: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Error deleting mantra: {str(e)}"
             ) 
