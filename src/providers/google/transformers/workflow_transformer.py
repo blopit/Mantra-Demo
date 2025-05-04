@@ -1,7 +1,7 @@
 """
 Transformer for converting n8n workflow nodes to Google-specific implementations.
 """
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import json
 import logging
 
@@ -13,7 +13,7 @@ class GoogleWorkflowTransformer:
     
     This transformer handles the conversion of n8n nodes that interact with
     Google services (Gmail, Calendar, Drive, etc.) into our internal
-    representation.
+    representation while maintaining N8N compatibility.
     """
     
     def __init__(self):
@@ -23,7 +23,9 @@ class GoogleWorkflowTransformer:
             'googleDrive': self._transform_drive_node,
             'googleSheets': self._transform_sheets_node
         }
-    
+        # Internal mapping of node IDs to Google-specific metadata
+        self._node_metadata: Dict[str, Dict[str, Any]] = {}
+        
     def transform_workflow(self, workflow: Dict[str, Any]) -> Dict[str, Any]:
         """
         Transform an n8n workflow into our internal representation.
@@ -37,6 +39,9 @@ class GoogleWorkflowTransformer:
         try:
             nodes = workflow.get('nodes', [])
             transformed_nodes = []
+            
+            # Clear previous metadata
+            self._node_metadata = {}
             
             for node in nodes:
                 node_type = node.get('type', '').lower()
@@ -52,6 +57,10 @@ class GoogleWorkflowTransformer:
             logger.info("Transformed workflow:")
             logger.info(json.dumps(transformed_nodes, indent=2))
             
+            # Log the internal metadata mapping
+            logger.info("Node metadata mapping:")
+            logger.info(json.dumps(self._node_metadata, indent=2))
+            
             return {
                 **workflow,
                 'nodes': transformed_nodes
@@ -61,54 +70,102 @@ class GoogleWorkflowTransformer:
             logger.error(f"Error transforming workflow: {str(e)}")
             raise
     
+    def get_node_metadata(self, node_id: str) -> Optional[Dict[str, Any]]:
+        """Get Google-specific metadata for a node."""
+        return self._node_metadata.get(node_id)
+    
     def _transform_gmail_node(self, node: Dict[str, Any]) -> Dict[str, Any]:
         """Transform Gmail node operations."""
-        return {
-            **node,
+        node_id = str(node.get('id', ''))
+        
+        # Store Google-specific metadata
+        self._node_metadata[node_id] = {
             'provider': 'google',
             'service': 'gmail',
-            'transformed': True,
             'credentials': {
                 'type': 'oauth2',
                 'required_scopes': ['https://www.googleapis.com/auth/gmail.modify']
             }
         }
+        
+        # Return N8N-compatible node structure
+        return {
+            'id': node_id,
+            'name': node.get('name', 'Gmail'),
+            'type': 'n8n-nodes-base.gmail',
+            'parameters': node.get('parameters', {}),
+            'typeVersion': 1,
+            'position': node.get('position', [0, 0])
+        }
     
     def _transform_calendar_node(self, node: Dict[str, Any]) -> Dict[str, Any]:
         """Transform Google Calendar node operations."""
-        return {
-            **node,
+        node_id = str(node.get('id', ''))
+        
+        # Store Google-specific metadata
+        self._node_metadata[node_id] = {
             'provider': 'google',
             'service': 'calendar',
-            'transformed': True,
             'credentials': {
                 'type': 'oauth2',
                 'required_scopes': ['https://www.googleapis.com/auth/calendar']
             }
         }
+        
+        # Return N8N-compatible node structure
+        return {
+            'id': node_id,
+            'name': node.get('name', 'Google Calendar'),
+            'type': 'n8n-nodes-base.googleCalendar',
+            'parameters': node.get('parameters', {}),
+            'typeVersion': node.get('typeVersion', 1),
+            'position': node.get('position', [0, 0])
+        }
     
     def _transform_drive_node(self, node: Dict[str, Any]) -> Dict[str, Any]:
         """Transform Google Drive node operations."""
-        return {
-            **node,
+        node_id = str(node.get('id', ''))
+        
+        # Store Google-specific metadata
+        self._node_metadata[node_id] = {
             'provider': 'google',
             'service': 'drive',
-            'transformed': True,
             'credentials': {
                 'type': 'oauth2',
                 'required_scopes': ['https://www.googleapis.com/auth/drive']
             }
         }
+        
+        # Return N8N-compatible node structure
+        return {
+            'id': node_id,
+            'name': node.get('name', 'Google Drive'),
+            'type': 'n8n-nodes-base.googleDrive',
+            'parameters': node.get('parameters', {}),
+            'typeVersion': 1,
+            'position': node.get('position', [0, 0])
+        }
     
     def _transform_sheets_node(self, node: Dict[str, Any]) -> Dict[str, Any]:
         """Transform Google Sheets node operations."""
-        return {
-            **node,
+        node_id = str(node.get('id', ''))
+        
+        # Store Google-specific metadata
+        self._node_metadata[node_id] = {
             'provider': 'google',
             'service': 'sheets',
-            'transformed': True,
             'credentials': {
                 'type': 'oauth2',
                 'required_scopes': ['https://www.googleapis.com/auth/spreadsheets']
             }
+        }
+        
+        # Return N8N-compatible node structure
+        return {
+            'id': node_id,
+            'name': node.get('name', 'Google Sheets'),
+            'type': 'n8n-nodes-base.googleSheets',
+            'parameters': node.get('parameters', {}),
+            'typeVersion': 1,
+            'position': node.get('position', [0, 0])
         } 

@@ -323,8 +323,13 @@ class N8nService:
         if 'connections' not in workflow_json:
             raise ValueError("Workflow JSON missing required fields: connections")
         
-        # Define Google service node types that don't need the n8n-nodes-base prefix
-        google_service_types = ['gmail', 'googlecalendar', 'googledrive', 'googlesheets']
+        # Define Google service node types that need special handling
+        google_service_types = {
+            'gmail': 'n8n-nodes-base.gmail',
+            'googlecalendar': 'n8n-nodes-base.googleCalendar',
+            'googledrive': 'n8n-nodes-base.googleDrive',
+            'googlesheets': 'n8n-nodes-base.googleSheets'
+        }
         
         # Validate node structure
         for i, node in enumerate(workflow_json.get('nodes', [])):
@@ -341,11 +346,17 @@ class N8nService:
             if missing_fields:
                 raise ValueError(f"Node {i} missing required fields: {', '.join(missing_fields)}")
             
-            # Ensure node type follows n8n format if not already and is not a Google service type
-            node_type_lower = node['type'].lower()
-            if (not node['type'].startswith('n8n-nodes-base.') and 
-                node_type_lower not in google_service_types):
-                node['type'] = f"n8n-nodes-base.{node['type']}"
+            # Handle node type transformation
+            node_type = node['type']
+            node_type_lower = node_type.lower()
+            
+            if node_type_lower in google_service_types:
+                # Transform Google service node types to their n8n equivalents
+                node['type'] = google_service_types[node_type_lower]
+                logger.info(f"Transformed Google service node type from {node_type} to {node['type']}")
+            elif not node_type.startswith('n8n-nodes-base.'):
+                # Add n8n-nodes-base prefix for other node types
+                node['type'] = f"n8n-nodes-base.{node_type}"
                 logger.info(f"Added n8n-nodes-base prefix to node type: {node['type']}")
         
         # Prepare workflow with defaults
@@ -410,7 +421,7 @@ class N8nService:
             raise ValueError(error_msg)
     
     def _prepare_workflow_for_n8n(self, workflow_json: Dict[str, Any]) -> Dict[str, Any]:
-        """Prepare a workflow for n8n by adding required fields.
+        """Prepare a workflow for n8n by adding required fields and removing unsupported ones.
         
         Args:
             workflow_json: The workflow to prepare
@@ -421,25 +432,49 @@ class N8nService:
         # Deep copy to avoid modifying the original
         workflow = json.loads(json.dumps(workflow_json))
         
-        # Required fields for n8n workflow
-        workflow.setdefault('name', 'Imported Workflow')
-        workflow.setdefault('nodes', [])
-        workflow.setdefault('connections', {})
-        workflow.setdefault('settings', {})
+        # Required fields for n8n workflow - only include what n8n API expects
+        prepared_workflow = {
+            'name': workflow.get('name', 'Imported Workflow'),
+            'nodes': [],
+            'connections': workflow.get('connections', {}),
+            'settings': workflow.get('settings', {})
+        }
         
-        # Ensure each node has required fields
+        # Define Google service node types mapping
+        google_service_types = {
+            'gmail': 'n8n-nodes-base.gmail',
+            'googlecalendar': 'n8n-nodes-base.googleCalendar',
+            'googledrive': 'n8n-nodes-base.googleDrive',
+            'googlesheets': 'n8n-nodes-base.googleSheets'
+        }
+        
+        # Process each node to ensure it has required fields and correct format
         for node in workflow.get('nodes', []):
-            node.setdefault('parameters', {})
-            node.setdefault('typeVersion', 1)
-            node.setdefault('position', [0, 0])
+            prepared_node = {
+                'id': str(node.get('id', '')),
+                'name': node.get('name', ''),
+                'type': node.get('type', ''),
+                'parameters': node.get('parameters', {}),
+                'typeVersion': node.get('typeVersion', 1),
+                'position': node.get('position', [0, 0])
+            }
             
-            # Ensure node type follows n8n format
-            if not node.get('type', '').startswith('n8n-nodes-base.'):
-                node_type = node.get('type', '')
-                if node_type:
-                    node['type'] = f"n8n-nodes-base.{node_type}"
+            # Handle node type transformation
+            node_type = prepared_node['type']
+            node_type_lower = node_type.lower()
+            
+            if node_type_lower in google_service_types:
+                # Transform Google service node types to their n8n equivalents
+                prepared_node['type'] = google_service_types[node_type_lower]
+                logger.info(f"Transformed Google service node type from {node_type} to {prepared_node['type']}")
+            elif not node_type.startswith('n8n-nodes-base.'):
+                # Add n8n-nodes-base prefix for other node types
+                prepared_node['type'] = f"n8n-nodes-base.{node_type}"
+                logger.info(f"Added n8n-nodes-base prefix to node type: {prepared_node['type']}")
+            
+            prepared_workflow['nodes'].append(prepared_node)
         
-        return workflow
+        return prepared_workflow
     
     async def list_workflows(self) -> List[Dict[str, Any]]:
         """List all workflows in n8n.
@@ -522,6 +557,15 @@ class N8nService:
                     )
                     response.raise_for_status()
                     created_workflow = response.json()
+                    
+                    # If workflow should be active, activate it after creation
+                    if workflow_json.get('active', False):
+                        try:
+                            await self.activate_workflow(created_workflow['id'])
+                        except Exception as e:
+                            logger.error(f"Failed to activate workflow after creation: {str(e)}")
+                            # Don't fail the whole operation if activation fails
+                            
                     logger.info(f"Successfully created n8n workflow with ID: {created_workflow.get('id')}")
                     return created_workflow
                 except httpx.RequestError as e:

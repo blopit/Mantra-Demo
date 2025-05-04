@@ -77,7 +77,7 @@ async def list_installed_mantras(
                 "mantra_id": str(inst.mantra_id),
                 "mantra_name": inst.mantra.name if inst.mantra else None,
                 "status": inst.status,
-                "created_at": inst.created_at,
+                "installed_at": inst.installed_at,
                 "n8n_workflow_id": inst.n8n_workflow_id
             }
             for inst in installations
