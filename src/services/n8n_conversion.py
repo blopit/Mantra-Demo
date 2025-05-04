@@ -134,145 +134,97 @@ class N8nConversionService:
             'method': 'GET',
             'url': '',
             'headers': {
-                'Content-Type': 'application/json'
+                'Content-Type': 'application/json',
+                'Authorization': f"Bearer {credentials.get('access_token')}"
             },
             'body': {}
         }
         
         # Convert different node types
-        if node_type == 'n8n-nodes-base.gmailTrigger':
-            # Gmail trigger conversion
-            request = {
-                'method': 'GET',
-                'url': 'https://www.googleapis.com/gmail/v1/users/me/messages',
-                'headers': {
-                    'Authorization': f"Bearer {credentials.get('access_token')}",
-                    'Content-Type': 'application/json'
-                },
-                'params': {
-                    'q': 'is:unread',
-                    'maxResults': 10
-                }
-            }
-        
-        elif node_type == '@n8n/n8n-nodes-langchain.lmChatOpenAi':
-            # OpenAI node conversion
-            openai_api_key = node.get('credentials', {}).get('openAiApi', {}).get('apiKey', '')
-            request = {
-                'method': 'POST',
-                'url': 'https://api.openai.com/v1/chat/completions',
-                'headers': {
-                    'Authorization': f"Bearer {openai_api_key}",
-                    'Content-Type': 'application/json'
-                },
-                'body': {
-                    'model': parameters.get('model', {}).get('value', 'gpt-4o-mini'),
-                    'messages': [
-                        {'role': 'system', 'content': parameters.get('systemMessage', '')}
-                    ]
-                }
-            }
-        
-        elif node_type == 'n8n-nodes-base.gmail':
-            # Gmail action conversion
+        if node_type == 'n8n-nodes-base.gmail':
             operation = parameters.get('operation', '')
             
-            if operation == 'reply':
+            if operation == 'sendEmail':
+                # Gmail send email operation
                 request = {
                     'method': 'POST',
-                    'url': f"https://www.googleapis.com/gmail/v1/users/me/messages/{{message_id}}/send",
+                    'url': 'https://gmail.googleapis.com/gmail/v1/users/me/messages/send',
                     'headers': {
                         'Authorization': f"Bearer {credentials.get('access_token')}",
                         'Content-Type': 'application/json'
                     },
                     'body': {
-                        'raw': "{{base64_encoded_email}}"
+                        'raw': self._create_email_raw(
+                            to=parameters.get('to', ''),
+                            subject=parameters.get('subject', ''),
+                            text=parameters.get('text', '')
+                        )
                     }
                 }
-            elif operation == 'markAsRead':
+        
+        elif node_type == 'n8n-nodes-base.googleCalendar':
+            operation = parameters.get('operation', '')
+            
+            if operation == 'createEvent':
+                # Calendar create event operation
                 request = {
                     'method': 'POST',
-                    'url': f"https://www.googleapis.com/gmail/v1/users/me/messages/{{message_id}}/modify",
+                    'url': 'https://www.googleapis.com/calendar/v3/calendars/primary/events',
                     'headers': {
                         'Authorization': f"Bearer {credentials.get('access_token')}",
                         'Content-Type': 'application/json'
                     },
                     'body': {
-                        'removeLabelIds': ['UNREAD']
+                        'summary': parameters.get('summary', ''),
+                        'description': parameters.get('description', ''),
+                        'start': {
+                            'dateTime': parameters.get('start', ''),
+                            'timeZone': 'UTC'
+                        },
+                        'end': {
+                            'dateTime': parameters.get('end', ''),
+                            'timeZone': 'UTC'
+                        }
                     }
                 }
         
-        elif node_type == '@n8n/n8n-nodes-langchain.textClassifier':
-            # Text Classifier node conversion
-            request = {
-                'method': 'POST',
-                'url': 'https://api.openai.com/v1/chat/completions',
-                'headers': {
-                    'Authorization': f"Bearer {credentials.get('openai_api_key')}",
-                    'Content-Type': 'application/json'
-                },
-                'body': {
-                    'model': 'gpt-4o-mini',
-                    'messages': [
-                        {
-                            'role': 'system', 
-                            'content': f"You are a text classifier that categorizes input into one of the following categories: {parameters.get('categories', {}).get('categories', [])}"
-                        },
-                        {
-                            'role': 'user',
-                            'content': parameters.get('inputText', '')
-                        }
-                    ]
+        elif node_type == 'n8n-nodes-base.googleDrive':
+            operation = parameters.get('operation', '')
+            
+            if operation == 'createFolder':
+                # Drive create folder operation
+                request = {
+                    'method': 'POST',
+                    'url': 'https://www.googleapis.com/drive/v3/files',
+                    'headers': {
+                        'Authorization': f"Bearer {credentials.get('access_token')}",
+                        'Content-Type': 'application/json'
+                    },
+                    'body': {
+                        'name': parameters.get('name', ''),
+                        'mimeType': 'application/vnd.google-apps.folder',
+                        'parents': [parameters.get('parent', 'root')]
+                    }
                 }
-            }
-        
-        elif node_type == '@n8n/n8n-nodes-langchain.agent':
-            # Agent node conversion
-            request = {
-                'method': 'POST',
-                'url': 'https://api.openai.com/v1/chat/completions',
-                'headers': {
-                    'Authorization': f"Bearer {credentials.get('openai_api_key')}",
-                    'Content-Type': 'application/json'
-                },
-                'body': {
-                    'model': 'gpt-4o',
-                    'messages': [
-                        {
-                            'role': 'system',
-                            'content': parameters.get('options', {}).get('systemMessage', '')
-                        },
-                        {
-                            'role': 'user',
-                            'content': parameters.get('text', '')
-                        }
-                    ]
-                }
-            }
-        
-        elif node_type == 'n8n-nodes-base.googleCalendarTool':
-            # Google Calendar Tool conversion
-            request = {
-                'method': 'GET',
-                'url': 'https://www.googleapis.com/calendar/v3/calendars/primary/events',
-                'headers': {
-                    'Authorization': f"Bearer {credentials.get('access_token')}",
-                    'Content-Type': 'application/json'
-                },
-                'params': {
-                    'timeMin': parameters.get('timeMin', ''),
-                    'timeMax': parameters.get('timeMax', ''),
-                    'maxResults': 100
-                }
-            }
-        
-        # Add more node type conversions as needed
         
         return {
             'node_name': node_name,
             'node_type': node_type,
             'request': request
         }
+    
+    def _create_email_raw(self, to: str, subject: str, text: str) -> str:
+        """Create base64 encoded email message."""
+        import base64
+        from email.mime.text import MIMEText
+        
+        message = MIMEText(text)
+        message['to'] = to
+        message['subject'] = subject
+        
+        # Encode the message
+        raw = base64.urlsafe_b64encode(message.as_bytes()).decode('utf-8')
+        return raw
     
     def generate_api_schema(self, workflow_json: Dict[str, Any]) -> Dict[str, Any]:
         """

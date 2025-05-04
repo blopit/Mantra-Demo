@@ -6,112 +6,98 @@ N8N API responses without making actual HTTP requests.
 """
 
 import pytest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, patch, Mock
 import json
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Union, List
 import httpx
 from src.services.n8n_service import N8nService
+from datetime import timedelta
 
 class MockResponse:
-    """Mock HTTP response."""
-    def __init__(self, status_code: int, data: Dict[str, Any], headers: Dict[str, str] = None, error: Optional[Exception] = None):
+    """Mock response object that simulates httpx.Response."""
+    def __init__(self, status_code: int, data: Dict[str, Any], error: Exception = None):
         self.status_code = status_code
         self._data = data
-        self.headers = headers or {"content-type": "application/json"}
-        self.text = json.dumps(data)
-        self.elapsed = AsyncMock()
-        self.elapsed.total_seconds.return_value = 0.1
-        self._error = error
-    
-    async def json(self):
+        self.error = error
+        self.elapsed = timedelta(seconds=0.1)
+        
+    def json(self) -> Dict[str, Any]:
         """Return response data as JSON."""
-        if self._error:
-            raise self._error
         return self._data
-    
+        
     def raise_for_status(self):
-        """Raise an exception if status code indicates an error."""
+        """Raise an error if status code is 400 or greater."""
+        if self.error:
+            raise self.error
         if self.status_code >= 400:
             raise httpx.HTTPStatusError(
-                message=f"HTTP Error {self.status_code}: {self._data.get('message', 'Unknown error')}",
-                request=None,
-                response=self
+                message=f"HTTP Error {self.status_code}",
+                request=Mock(),
+                response=Mock(status_code=self.status_code, text=str(self._data))
             )
-        if self._error:
-            raise self._error
 
 class MockAsyncClient:
     """Mock HTTP client that simulates N8N API responses."""
-    def __init__(self, responses: Dict[str, MockResponse] = None):
+    def __init__(self, responses: Dict[str, Union[MockResponse, List[MockResponse]]] = None):
         self.responses = responses or {}
         self.default_response = MockResponse(
             status_code=200,
             data={"status": "ok", "version": "1.0.0"}
         )
         self.request_history = []
-    
-    async def get(self, url: str, **kwargs) -> MockResponse:
-        """Handle GET requests."""
-        self.request_history.append(("GET", url, kwargs))
-        if url not in self.responses:
-            return MockResponse(
-                status_code=404,
-                data={"message": f"Not found: {url}"}
-            )
-        return self.responses[url]
-    
-    async def post(self, url: str, **kwargs) -> MockResponse:
-        """Handle POST requests."""
-        self.request_history.append(("POST", url, kwargs))
-        if url not in self.responses:
-            return MockResponse(
-                status_code=404,
-                data={"message": f"Not found: {url}"}
-            )
-        
-        # Special handling for workflow creation
-        if url.endswith("/workflows"):
-            json_data = kwargs.get("json", {})
-            if not json_data.get("name"):
-                return MockResponse(
-                    status_code=400,
-                    data={"message": "Workflow name is required"}
-                )
-            if not json_data.get("nodes"):
-                return MockResponse(
-                    status_code=400,
-                    data={"message": "Workflow must contain at least one node"}
-                )
-        
-        return self.responses[url]
-    
-    async def delete(self, url: str, **kwargs) -> MockResponse:
-        """Handle DELETE requests."""
-        self.request_history.append(("DELETE", url, kwargs))
-        if url not in self.responses:
-            return MockResponse(
-                status_code=404,
-                data={"message": f"Not found: {url}"}
-            )
-        return self.responses[url]
-    
-    async def put(self, url: str, **kwargs) -> MockResponse:
-        """Handle PUT requests."""
-        self.request_history.append(("PUT", url, kwargs))
-        if url not in self.responses:
-            return MockResponse(
-                status_code=404,
-                data={"message": f"Not found: {url}"}
-            )
-        return self.responses[url]
+        self.response_index = {}  # Track index for sequence responses
+        self.is_closed = False
     
     async def __aenter__(self):
-        """Enter async context."""
+        """Async context manager entry."""
         return self
     
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Exit async context."""
-        pass
+        """Async context manager exit."""
+        await self.aclose()
+        
+    async def aclose(self):
+        """Close the client."""
+        self.is_closed = True
+    
+    def _get_response(self, url: str) -> MockResponse:
+        """Get the appropriate response for a URL, handling sequences."""
+        if url not in self.responses:
+            return self.default_response
+        
+        response = self.responses[url]
+        if isinstance(response, list):
+            # Get current index for this URL, defaulting to 0
+            current_index = self.response_index.get(url, 0)
+            # Update index for next time
+            self.response_index[url] = (current_index + 1) % len(response)
+            return response[current_index]
+        return response
+    
+    async def get(self, url: str, **kwargs) -> MockResponse:
+        """Simulate GET request."""
+        self.request_history.append(("GET", url, kwargs))
+        return self._get_response(url)
+    
+    async def post(self, url: str, **kwargs) -> MockResponse:
+        """Simulate POST request."""
+        self.request_history.append(("POST", url, kwargs))
+        return self._get_response(url)
+    
+    async def patch(self, url: str, **kwargs) -> MockResponse:
+        """Simulate PATCH request."""
+        self.request_history.append(("PATCH", url, kwargs))
+        return self._get_response(url)
+    
+    async def put(self, url: str, **kwargs) -> MockResponse:
+        """Simulate PUT request."""
+        self.request_history.append(("PUT", url, kwargs))
+        return self._get_response(url)
+    
+    async def delete(self, url: str, **kwargs) -> MockResponse:
+        """Simulate DELETE request."""
+        self.request_history.append(("DELETE", url, kwargs))
+        return self._get_response(url)
 
 @pytest.fixture
 def mock_n8n_service():
@@ -175,4 +161,4 @@ def mock_n8n_service():
     
     # Patch httpx.AsyncClient
     with patch("httpx.AsyncClient", return_value=mock_client):
-        yield service 
+        yield service

@@ -216,3 +216,71 @@ async def delete_google_integration(
             ),
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+
+@router.get("/status")
+async def get_integration_status(request: Request, db: Session = Depends(get_db)):
+    """Check if user has an active Google integration."""
+    try:
+        # Get user from session
+        user = request.session.get("user")
+        if not user:
+            return JSONResponse({
+                "is_connected": False,
+                "message": "Not logged in"
+            })
+
+        # Check for active integration
+        integration = db.query(GoogleIntegration).filter(
+            GoogleIntegration.email == user.get("email"),
+            GoogleIntegration.status == "connected"
+        ).first()
+
+        if integration:
+            return JSONResponse({
+                "is_connected": True,
+                "email": integration.email,
+                "status": integration.status,
+                "connected_at": integration.created_at.isoformat() if integration.created_at else None
+            })
+        else:
+            return JSONResponse({
+                "is_connected": False,
+                "message": "No active Google integration found"
+            })
+
+    except Exception as e:
+        logger.error(f"Error checking Google integration status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/disconnect")
+async def disconnect_integration(request: Request, db: Session = Depends(get_db)):
+    """Disconnect Google integration."""
+    try:
+        # Get user from session
+        user = request.session.get("user")
+        if not user:
+            raise HTTPException(status_code=401, detail="Not logged in")
+
+        # Find active integration
+        integration = db.query(GoogleIntegration).filter(
+            GoogleIntegration.email == user.get("email"),
+            GoogleIntegration.status == "connected"
+        ).first()
+
+        if not integration:
+            raise HTTPException(status_code=404, detail="No active Google integration found")
+
+        # Update integration status
+        integration.status = "disconnected"
+        db.commit()
+
+        return JSONResponse({
+            "success": True,
+            "message": "Successfully disconnected Google integration"
+        })
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error disconnecting Google integration: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

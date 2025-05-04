@@ -153,157 +153,159 @@ class N8nService:
             "timeout": self.timeout
         })
         
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            try:
-                response = await client.get(url, headers=self.headers)
-                
-                # Handle 401 Unauthorized immediately without retrying
-                if response.status_code == 401:
-                    error_msg = "Unauthorized access to n8n service. Check API key configuration."
-                    logger.error(error_msg)
-                    raise HTTPException(
-                        status_code=401,
-                        detail=error_msg
-                    )
-                
-                # For other status codes, raise_for_status and handle in the exception block
-                response.raise_for_status()
-                
-                # For health check, a 200 status code is sufficient
-                logger.info("Successfully connected to n8n service")
-                return {
-                    "is_connected": True,
-                    "status": "ok",
-                    "response_time_ms": response.elapsed.total_seconds() * 1000
-                }
-                
-            except httpx.HTTPStatusError as e:
-                # Handle 401 Unauthorized immediately without retrying
-                if e.response.status_code == 401:
-                    error_msg = "Unauthorized access to n8n service. Check API key configuration."
-                    logger.error(error_msg)
-                    raise HTTPException(
-                        status_code=401,
-                        detail=error_msg
-                    ) from e
-                
-                # For other HTTP errors, retry
-                logger.error(f"HTTP error during connection check: {str(e)}", extra={
-                    "status_code": e.response.status_code,
-                    "response": e.response.text
-                })
-                
-                # Retry with exponential backoff
-                for attempt in range(1, self.max_retries):
-                    try:
-                        await asyncio.sleep(self.retry_delay * (2 ** (attempt - 1)))
-                        response = await client.get(url, headers=self.headers)
-                        response.raise_for_status()
-                        
-                        logger.info("Successfully connected to n8n service after retry")
-                        return {
-                            "is_connected": True,
-                            "status": "ok",
-                            "response_time_ms": response.elapsed.total_seconds() * 1000
-                        }
-                    except httpx.HTTPStatusError as retry_e:
-                        if retry_e.response.status_code == 401:
-                            error_msg = "Unauthorized access to n8n service. Check API key configuration."
-                            logger.error(error_msg)
-                            raise HTTPException(
-                                status_code=401,
-                                detail=error_msg
-                            ) from retry_e
-                        continue
-                    except Exception:
-                        continue
-                
-                # If we get here, all retries failed
+        client = httpx.AsyncClient(timeout=self.timeout)
+        try:
+            response = await client.get(url, headers=self.headers)
+            
+            # Handle 401 Unauthorized immediately without retrying
+            if response.status_code == 401:
+                error_msg = "Unauthorized access to n8n service. Check API key configuration."
+                logger.error(error_msg)
                 raise HTTPException(
-                    status_code=e.response.status_code,
-                    detail=f"n8n service returned error: {e.response.text}"
-                ) from e
-                
-            except httpx.ConnectError as e:
-                # Retry with exponential backoff
-                for attempt in range(1, self.max_retries):
-                    try:
-                        await asyncio.sleep(self.retry_delay * (2 ** (attempt - 1)))
-                        response = await client.get(url, headers=self.headers)
-                        response.raise_for_status()
-                        
-                        logger.info("Successfully connected to n8n service after retry")
-                        return {
-                            "is_connected": True,
-                            "status": "ok",
-                            "response_time_ms": response.elapsed.total_seconds() * 1000
-                        }
-                    except Exception:
-                        continue
-                
-                # If we get here, all retries failed
+                    status_code=401,
+                    detail=error_msg
+                )
+            
+            # For other status codes, raise_for_status and handle in the exception block
+            response.raise_for_status()
+            
+            # For health check, a 200 status code is sufficient
+            logger.info("Successfully connected to n8n service")
+            return {
+                "is_connected": True,
+                "status": "ok",
+                "response_time_ms": response.elapsed.total_seconds() * 1000
+            }
+            
+        except httpx.HTTPStatusError as e:
+            # Handle 401 Unauthorized immediately without retrying
+            if e.response.status_code == 401:
+                error_msg = "Unauthorized access to n8n service. Check API key configuration."
+                logger.error(error_msg)
                 raise HTTPException(
-                    status_code=503,
-                    detail=f"Failed to connect to n8n service after {self.max_retries} attempts: {str(e)}"
+                    status_code=401,
+                    detail=error_msg
                 ) from e
-                
-            except httpx.TimeoutException as e:
-                # Retry with exponential backoff
-                for attempt in range(1, self.max_retries):
-                    try:
-                        await asyncio.sleep(self.retry_delay * (2 ** (attempt - 1)))
-                        response = await client.get(url, headers=self.headers)
-                        response.raise_for_status()
-                        
-                        logger.info("Successfully connected to n8n service after retry")
-                        return {
-                            "is_connected": True,
-                            "status": "ok",
-                            "response_time_ms": response.elapsed.total_seconds() * 1000
-                        }
-                    except Exception:
-                        continue
-                
-                # If we get here, all retries failed
+            
+            # For other HTTP errors, retry
+            logger.error(f"HTTP error during connection check: {str(e)}", extra={
+                "status_code": e.response.status_code,
+                "response": e.response.text
+            })
+            
+            # Retry with exponential backoff
+            for attempt in range(1, self.max_retries):
+                try:
+                    await asyncio.sleep(self.retry_delay * (2 ** (attempt - 1)))
+                    response = await client.get(url, headers=self.headers)
+                    response.raise_for_status()
+                    
+                    logger.info("Successfully connected to n8n service after retry")
+                    return {
+                        "is_connected": True,
+                        "status": "ok",
+                        "response_time_ms": response.elapsed.total_seconds() * 1000
+                    }
+                except httpx.HTTPStatusError as retry_e:
+                    if retry_e.response.status_code == 401:
+                        error_msg = "Unauthorized access to n8n service. Check API key configuration."
+                        logger.error(error_msg)
+                        raise HTTPException(
+                            status_code=401,
+                            detail=error_msg
+                        ) from retry_e
+                    continue
+                except Exception:
+                    continue
+            
+            # If we get here, all retries failed
+            raise HTTPException(
+                status_code=e.response.status_code,
+                detail=f"n8n service returned error: {e.response.text}"
+            ) from e
+            
+        except httpx.ConnectError as e:
+            # Retry with exponential backoff
+            for attempt in range(1, self.max_retries):
+                try:
+                    await asyncio.sleep(self.retry_delay * (2 ** (attempt - 1)))
+                    response = await client.get(url, headers=self.headers)
+                    response.raise_for_status()
+                    
+                    logger.info("Successfully connected to n8n service after retry")
+                    return {
+                        "is_connected": True,
+                        "status": "ok",
+                        "response_time_ms": response.elapsed.total_seconds() * 1000
+                    }
+                except Exception:
+                    continue
+            
+            # If we get here, all retries failed
+            raise HTTPException(
+                status_code=503,
+                detail=f"Failed to connect to n8n service after {self.max_retries} attempts: {str(e)}"
+            ) from e
+            
+        except httpx.TimeoutException as e:
+            # Retry with exponential backoff
+            for attempt in range(1, self.max_retries):
+                try:
+                    await asyncio.sleep(self.retry_delay * (2 ** (attempt - 1)))
+                    response = await client.get(url, headers=self.headers)
+                    response.raise_for_status()
+                    
+                    logger.info("Successfully connected to n8n service after retry")
+                    return {
+                        "is_connected": True,
+                        "status": "ok",
+                        "response_time_ms": response.elapsed.total_seconds() * 1000
+                    }
+                except Exception:
+                    continue
+            
+            # If we get here, all retries failed
+            raise HTTPException(
+                status_code=503,
+                detail=f"Failed to connect to n8n service after {self.max_retries} attempts: {str(e)}"
+            ) from e
+            
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(f"Unexpected error during connection check: {error_msg}")
+            
+            # Check for unauthorized errors in the error message
+            if "401" in error_msg or "Unauthorized" in error_msg:
+                error_msg = "Unauthorized access to n8n service. Check API key configuration."
+                logger.error(error_msg)
                 raise HTTPException(
-                    status_code=503,
-                    detail=f"Failed to connect to n8n service after {self.max_retries} attempts: {str(e)}"
+                    status_code=401,
+                    detail=error_msg
                 ) from e
-                
-            except Exception as e:
-                error_msg = str(e)
-                logger.error(f"Unexpected error during connection check: {error_msg}")
-                
-                # Check for unauthorized errors in the error message
-                if "401" in error_msg or "Unauthorized" in error_msg:
-                    error_msg = "Unauthorized access to n8n service. Check API key configuration."
-                    logger.error(error_msg)
-                    raise HTTPException(
-                        status_code=401,
-                        detail=error_msg
-                    ) from e
-                
-                # Retry with exponential backoff
-                for attempt in range(1, self.max_retries):
-                    try:
-                        await asyncio.sleep(self.retry_delay * (2 ** (attempt - 1)))
-                        response = await client.get(url, headers=self.headers)
-                        response.raise_for_status()
-                        
-                        logger.info("Successfully connected to n8n service after retry")
-                        return {
-                            "is_connected": True,
-                            "status": "ok",
-                            "response_time_ms": response.elapsed.total_seconds() * 1000
-                        }
-                    except Exception:
-                        continue
-                
-                # If we get here, all retries failed
-                raise HTTPException(
-                    status_code=503,
-                    detail=f"Failed to connect to n8n service after {self.max_retries} attempts: {error_msg}"
-                ) from e
+            
+            # Retry with exponential backoff
+            for attempt in range(1, self.max_retries):
+                try:
+                    await asyncio.sleep(self.retry_delay * (2 ** (attempt - 1)))
+                    response = await client.get(url, headers=self.headers)
+                    response.raise_for_status()
+                    
+                    logger.info("Successfully connected to n8n service after retry")
+                    return {
+                        "is_connected": True,
+                        "status": "ok",
+                        "response_time_ms": response.elapsed.total_seconds() * 1000
+                    }
+                except Exception:
+                    continue
+            
+            # If we get here, all retries failed
+            raise HTTPException(
+                status_code=503,
+                detail=f"Failed to connect to n8n service after {self.max_retries} attempts: {error_msg}"
+            ) from e
+        finally:
+            await client.aclose()
 
     def parse_workflow(self, workflow_json: Dict[str, Any]) -> Dict[str, Any]:
         """Parse and validate a workflow JSON.
@@ -581,14 +583,17 @@ class N8nService:
                         raise HTTPException(status_code=e.response.status_code, detail=f"n8n API error: {e.response.text}")
                 await asyncio.sleep(self.retry_delay * (2 ** attempt))
 
-    async def activate_workflow(self, workflow_id: Union[str, int]) -> None:
+    async def activate_workflow(self, workflow_id: Union[str, int]) -> bool:
         """Activate a workflow in n8n.
         
         Args:
             workflow_id: The ID of the workflow to activate
             
+        Returns:
+            True if activation was successful
+            
         Raises:
-            HTTPException: If workflow activation fails
+            HTTPException: If there is an error activating the workflow
         """
         try:
             # First check if workflow exists and get its current state
@@ -599,69 +604,134 @@ class N8nService:
                     detail=f"Workflow {workflow_id} not found"
                 )
             
-            # If already active, no need to activate again
-            if workflow.get("active", False):
-                logger.info(f"Workflow {workflow_id} is already active")
-                return
+            # Check if workflow has webhook nodes
+            webhook_nodes = [
+                node for node in workflow.get('nodes', [])
+                if node.get('type') == 'n8n-nodes-base.webhook'
+            ]
+            has_webhook = bool(webhook_nodes)
             
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
+            # Activate the workflow with retries
+            async with httpx.AsyncClient() as client:
                 for attempt in range(self.max_retries):
                     try:
+                        # First try POST to /activate endpoint
                         response = await client.post(
                             f"{self.api_url}/workflows/{workflow_id}/activate",
-                            headers=self.headers
+                            headers=self.headers,
+                            timeout=self.timeout
                         )
                         
-                        if response.status_code == 400:
-                            error_detail = None
-                            try:
-                                error_json = response.json()
-                                if isinstance(error_json, dict):
-                                    error_detail = error_json.get('message', error_json)
-                            except:
-                                error_detail = response.text
-                            
-                            logger.error(f"N8N API returned 400 error: {error_detail}")
-                            raise HTTPException(
-                                status_code=400,
-                                detail=f"Failed to activate workflow: {error_detail}"
-                            )
-                        
                         response.raise_for_status()
-                        logger.info(f"Successfully activated workflow {workflow_id}")
-                        return
                         
-                    except httpx.HTTPError as e:
-                        if isinstance(e, httpx.HTTPStatusError):
-                            if e.response.status_code == 404:
+                        # Wait for activation to complete
+                        await asyncio.sleep(2)
+                        
+                        # Verify activation
+                        current_state = await self.get_workflow(workflow_id)
+                        if not current_state or not current_state.get('active'):
+                            if attempt == self.max_retries - 1:
                                 raise HTTPException(
-                                    status_code=404,
-                                    detail=f"Workflow {workflow_id} not found"
+                                    status_code=500,
+                                    detail="Workflow activation could not be verified"
                                 )
-                            elif e.response.status_code == 400:
-                                error_detail = None
+                            continue
+                        
+                        # If workflow has webhook nodes, ensure they are properly registered
+                        if has_webhook:
+                            # Wait longer for webhook registration
+                            await asyncio.sleep(5)
+                            
+                            # Get webhook URL
+                            webhook_url = await self.get_webhook_url(workflow_id)
+                            if not webhook_url:
+                                if attempt == self.max_retries - 1:
+                                    raise HTTPException(
+                                        status_code=500,
+                                        detail="Failed to get webhook URL after activation"
+                                    )
+                                continue
+                            
+                            # Test webhook with exponential backoff
+                            max_webhook_retries = 5
+                            webhook_registered = False
+                            
+                            for webhook_attempt in range(max_webhook_retries):
                                 try:
-                                    error_json = e.response.json()
-                                    if isinstance(error_json, dict):
-                                        error_detail = error_json.get('message', error_json)
-                                except:
-                                    error_detail = e.response.text
-                                
-                                raise HTTPException(
-                                    status_code=400,
-                                    detail=f"Failed to activate workflow: {error_detail}"
-                                )
+                                    # Test webhook with minimal payload
+                                    test_response = await client.post(
+                                        webhook_url,
+                                        json={"test": True},
+                                        timeout=self.timeout
+                                    )
+                                    
+                                    if test_response.status_code != 404:
+                                        webhook_registered = True
+                                        break
+                                    
+                                    # If we get a 404, wait and retry
+                                    wait_time = min(30, 2 ** webhook_attempt)
+                                    logger.info(f"Waiting {wait_time}s for webhook registration...")
+                                    await asyncio.sleep(wait_time)
+                                    
+                                except Exception as e:
+                                    logger.warning(f"Webhook test attempt {webhook_attempt + 1} failed: {str(e)}")
+                                    if webhook_attempt == max_webhook_retries - 1:
+                                        logger.error("Max webhook test retries reached")
+                                        break
+                                    await asyncio.sleep(2 ** webhook_attempt)
+                            
+                            if not webhook_registered and attempt == self.max_retries - 1:
+                                # On final attempt, if webhook isn't registered, deactivate and reactivate
+                                try:
+                                    await self.deactivate_workflow(workflow_id)
+                                    await asyncio.sleep(2)
+                                    await client.post(
+                                        f"{self.api_url}/workflows/{workflow_id}/activate",
+                                        headers=self.headers,
+                                        timeout=self.timeout
+                                    )
+                                except Exception as e:
+                                    logger.error(f"Final webhook registration attempt failed: {str(e)}")
+                                    raise HTTPException(
+                                        status_code=500,
+                                        detail="Failed to register webhook after multiple attempts"
+                                    )
                         
-                        if attempt == self.max_retries - 1:
-                            logger.error(f"Failed to activate workflow {workflow_id} after {self.max_retries} attempts: {str(e)}")
+                        logger.info(f"Successfully activated workflow {workflow_id}")
+                        return True
+                        
+                    except httpx.HTTPStatusError as e:
+                        if e.response.status_code == 409:
+                            # Workflow is already active
+                            logger.info(f"Workflow {workflow_id} is already active")
+                            return True
+                            
+                        elif attempt == self.max_retries - 1:
+                            # Last attempt failed
                             raise HTTPException(
-                                status_code=500,
-                                detail=f"Failed to activate workflow after {self.max_retries} attempts: {str(e)}"
+                                status_code=e.response.status_code,
+                                detail=f"Error activating workflow: {e.response.text}"
                             )
                         
+                        # Wait before retrying
                         await asyncio.sleep(self.retry_delay * (2 ** attempt))
                         continue
                         
+                    except Exception as e:
+                        if attempt == self.max_retries - 1:
+                            raise HTTPException(
+                                status_code=500,
+                                detail=f"Error activating workflow: {str(e)}"
+                            )
+                        await asyncio.sleep(self.retry_delay * (2 ** attempt))
+                        continue
+            
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to activate workflow after {self.max_retries} attempts"
+            )
+            
         except HTTPException:
             raise
         except Exception as e:
@@ -874,7 +944,14 @@ class N8nService:
                     detail=f"Workflow {workflow_id} not found"
                 )
             
-            logger.info(f"Retrieved workflow {workflow_id} configuration: {json.dumps(workflow, indent=2)}")
+            logger.info(f"Retrieved workflow {workflow_id} configuration")
+            
+            # Check if this is a webhook-triggered workflow
+            webhook_nodes = [
+                node for node in workflow.get('nodes', [])
+                if node.get('type') == 'n8n-nodes-base.webhook'
+            ]
+            has_webhook = bool(webhook_nodes)
             
             # If not active, activate it first
             if not workflow.get("active", False):
@@ -883,27 +960,34 @@ class N8nService:
             else:
                 logger.info(f"Workflow {workflow_id} is already active")
             
-            # Check if this is a webhook-triggered workflow
-            webhook_url = await self.get_webhook_url(workflow_id)
-            
-            if webhook_url:
-                logger.info(f"Executing webhook-triggered workflow {workflow_id} at URL: {webhook_url}")
-                logger.debug(f"Webhook request data: {json.dumps(data, indent=2)}")
-            else:
-                logger.info(f"Executing regular workflow {workflow_id} via execute endpoint")
+            # Get webhook URL if this is a webhook-triggered workflow
+            webhook_url = None
+            if has_webhook:
+                webhook_url = await self.get_webhook_url(workflow_id)
+                if not webhook_url:
+                    raise HTTPException(
+                        status_code=500,
+                        detail="Failed to get webhook URL"
+                    )
+                logger.info(f"Using webhook URL: {webhook_url}")
+                
+                # Get the configured HTTP method
+                webhook_node = webhook_nodes[0]
+                parameters = webhook_node.get('parameters', {})
+                http_method = parameters.get('httpMethod', 'POST')
+                logger.info(f"Using HTTP method from webhook configuration: {http_method}")
             
             async with httpx.AsyncClient() as client:
                 if webhook_url:
                     # For webhook-triggered workflows, send request to webhook URL
-                    logger.info(f"Sending POST request to webhook URL: {webhook_url}")
-                    response = await client.post(
-                        webhook_url,
-                        json=data,  # Send data directly without wrapping
+                    logger.info(f"Sending {http_method} request to webhook URL: {webhook_url}")
+                    response = await client.request(
+                        method=http_method,
+                        url=webhook_url,
+                        json=data,
+                        headers={'Content-Type': 'application/json'},
                         timeout=self.timeout
                     )
-                    logger.debug(f"Webhook response status: {response.status_code}")
-                    logger.debug(f"Webhook response headers: {dict(response.headers)}")
-                    logger.debug(f"Webhook response body: {response.text}")
                 else:
                     # For regular workflows, use execute endpoint
                     execute_url = f"{self.api_url}/workflows/{workflow_id}/execute"
@@ -914,42 +998,60 @@ class N8nService:
                         json={"data": data},
                         timeout=self.timeout
                     )
-                    logger.debug(f"Execute response status: {response.status_code}")
-                    logger.debug(f"Execute response headers: {dict(response.headers)}")
-                    logger.debug(f"Execute response body: {response.text}")
                 
                 if response.status_code == 404:
                     error_msg = f"Endpoint not found: {webhook_url if webhook_url else execute_url}"
                     logger.error(error_msg)
-                    raise HTTPException(
-                        status_code=404,
-                        detail=error_msg
-                    )
-                elif response.status_code == 400:
-                    error_detail = None
-                    try:
-                        error_json = response.json()
-                        if isinstance(error_json, dict):
-                            error_detail = error_json.get('message', error_json)
-                    except:
-                        error_detail = response.text
                     
-                    error_msg = f"Bad request executing workflow: {error_detail}"
-                    logger.error(error_msg)
+                    if webhook_url:
+                        # If webhook returns 404, try re-registering the webhook
+                        logger.info("Webhook returned 404, attempting to reactivate workflow")
+                        await self.activate_workflow(workflow_id)
+                        # Wait a moment for activation
+                        await asyncio.sleep(1)
+                        
+                        # Try the request again
+                        response = await client.request(
+                            method=http_method,
+                            url=webhook_url,
+                            json=data,
+                            headers={'Content-Type': 'application/json'},
+                            timeout=self.timeout
+                        )
+                    else:
+                        raise HTTPException(
+                            status_code=404,
+                            detail=error_msg
+                        )
+                
+                try:
+                    response.raise_for_status()
+                except httpx.HTTPError as e:
+                    logger.error(f"HTTP error executing workflow: {str(e)}")
+                    if hasattr(e, 'response'):
+                        logger.error(f"Response status: {e.response.status_code}")
+                        logger.error(f"Response body: {e.response.text}")
                     raise HTTPException(
-                        status_code=400,
-                        detail=error_msg
+                        status_code=e.response.status_code if hasattr(e, 'response') else 500,
+                        detail=f"Error executing workflow: {str(e)}"
                     )
                 
-                response.raise_for_status()
-                result = response.json()
+                try:
+                    result = response.json()
+                except json.JSONDecodeError:
+                    logger.error(f"Invalid JSON response: {response.text}")
+                    raise HTTPException(
+                        status_code=500,
+                        detail="Invalid response format from n8n"
+                    )
                 
                 if not isinstance(result, dict):
                     error_msg = "Invalid response from n8n API: not a JSON object"
                     logger.error(error_msg)
-                    raise ValueError(error_msg)
-                
-                logger.debug(f"Workflow execution result: {json.dumps(result, indent=2)}")
+                    raise HTTPException(
+                        status_code=500,
+                        detail=error_msg
+                    )
                 
                 # n8n returns the result in a specific format
                 if "data" in result:
@@ -972,47 +1074,19 @@ class N8nService:
                     # Unexpected response format
                     error_msg = f"Unexpected response format from n8n: {result}"
                     logger.error(error_msg)
-                    raise ValueError(error_msg)
-            
-        except httpx.HTTPError as e:
-            logger.error(f"HTTP error executing n8n workflow {workflow_id}: {str(e)}", exc_info=True)
-            if isinstance(e, httpx.HTTPStatusError):
-                status_code = e.response.status_code
-                error_detail = None
-                try:
-                    error_json = e.response.json()
-                    if isinstance(error_json, dict):
-                        error_detail = error_json.get('message', error_json)
-                except:
-                    error_detail = e.response.text
+                    raise HTTPException(
+                        status_code=500,
+                        detail=error_msg
+                    )
                 
-                error_msg = f"Failed to execute workflow: {error_detail}"
-                logger.error(error_msg)
-                raise HTTPException(
-                    status_code=status_code,
-                    detail=error_msg
-                ) from e
-            
-            error_msg = f"Failed to execute workflow: {str(e)}"
-            logger.error(error_msg)
-            raise HTTPException(
-                status_code=500,
-                detail=error_msg
-            ) from e
-        except ValueError as e:
-            error_msg = f"Invalid response from n8n API: {str(e)}"
-            logger.error(error_msg)
-            raise HTTPException(
-                status_code=500,
-                detail=error_msg
-            ) from e
+        except HTTPException:
+            raise
         except Exception as e:
-            error_msg = f"Unexpected error executing workflow: {str(e)}"
-            logger.error(error_msg, exc_info=True)
+            logger.error(f"Error executing workflow {workflow_id}: {str(e)}")
             raise HTTPException(
                 status_code=500,
-                detail=error_msg
-            ) from e
+                detail=f"Error executing workflow: {str(e)}"
+            )
 
     async def get_workflow(self, workflow_id: str) -> Optional[Dict[str, Any]]:
         """Get a workflow from n8n.

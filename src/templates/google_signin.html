@@ -316,7 +316,17 @@
                     e.preventDefault();
 
                     try {
-                        // Fetch the auth URL from the backend
+                        // First check if we already have an active integration
+                        const statusResponse = await fetch('/api/google-integrations/status');
+                        const statusData = await statusResponse.json();
+
+                        if (statusData.is_connected) {
+                            // If already connected, just refresh the page to show the status
+                            window.location.reload();
+                            return;
+                        }
+
+                        // If not connected, fetch the auth URL from the backend
                         const response = await fetch('/api/google/auth');
                         const data = await response.json();
 
