@@ -5,7 +5,17 @@
         "nodes": [
             {
                 "id": "1",
-                "type": "gmail",
+                "type": "n8n-nodes-base.webhook",
+                "name": "Webhook Trigger",
+                "parameters": {
+                    "path": "onboarding",
+                    "responseMode": "responseNode",
+                    "options": {}
+                }
+            },
+            {
+                "id": "2",
+                "type": "n8n-nodes-base.gmail",
                 "name": "Send Email",
                 "parameters": {
                     "operation": "sendEmail",
@@ -15,8 +25,8 @@
                 }
             },
             {
-                "id": "2",
-                "type": "googleCalendar",
+                "id": "3",
+                "type": "n8n-nodes-base.googleCalendar",
                 "name": "Create Event",
                 "parameters": {
                     "operation": "createEvent",
@@ -29,6 +39,9 @@
             }
         ],
         "connections": {
+            "Webhook Trigger": {
+                "main": [["Send Email", 0]]
+            },
             "Send Email": {
                 "main": [["Create Event", 0]]
             }
