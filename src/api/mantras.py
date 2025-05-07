@@ -46,7 +46,7 @@ async def install_mantra(
 
 @router.post("/{mantra_id}/uninstall")
 async def uninstall_mantra(
-    mantra_id: int,
+    mantra_id: str,
     db_session: AsyncSession = Depends(get_db),
 ):
     """Uninstall a mantra."""

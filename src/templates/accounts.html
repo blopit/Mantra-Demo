@@ -926,7 +926,12 @@
             if (!confirm('Are you sure you want to delete this mantra? This action cannot be undone.')) return;
             
             try {
-                const response = await fetch(`/api/mantras/${mantraId}`, {
+                // Get the current user's ID from the session
+                const userResponse = await fetch('/api/google/status');
+                const userData = await userResponse.json();
+                const userId = userData.user.id;
+                
+                const response = await fetch(`/api/mantras/${mantraId}?user_id=${userId}`, {
                     method: 'DELETE'
                 });
                 
