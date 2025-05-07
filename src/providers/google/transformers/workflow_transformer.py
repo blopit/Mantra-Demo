@@ -37,44 +37,99 @@ class GoogleWorkflowTransformer:
             Dict[str, Any]: Transformed workflow definition
         """
         try:
+            logger.info("Starting workflow transformation")
+            logger.info(f"Input workflow: {json.dumps(workflow, indent=2)}")
+            
             nodes = workflow.get('nodes', [])
+            logger.info(f"Found {len(nodes)} nodes to transform")
             transformed_nodes = []
             
             # Clear previous metadata
             self._node_metadata = {}
             
-            # First pass: identify and transform trigger nodes
-            trigger_nodes = [node for node in nodes if self._is_trigger_node(node)]
-            non_trigger_nodes = [node for node in nodes if not self._is_trigger_node(node)]
+            # Keep track of execute nodes to avoid duplicates
+            execute_nodes = set()
             
-            # Transform trigger nodes to "executed by other workflow" triggers
-            for node in trigger_nodes:
-                transformed_node = self._transform_trigger_node(node)
-                transformed_nodes.append(transformed_node)
-            
-            # Transform remaining nodes
-            for node in non_trigger_nodes:
+            # Transform all nodes while preserving trigger nodes
+            for node in nodes:
                 node_type = node.get('type', '').lower()
-                if node_type in self.supported_nodes:
-                    transformed_node = self.supported_nodes[node_type](node)
+                node_id = str(node.get('id', ''))
+                
+                # If it's a trigger node, keep it and add executeWorkflow node
+                if self._is_trigger_node(node):
+                    # Keep the original trigger node
+                    if not node_type.startswith('n8n-nodes-base.'):
+                        node['type'] = f"n8n-nodes-base.{node_type}"
+                    
+                    # For webhook nodes, ensure proper configuration
+                    if 'webhook' in node_type:
+                        node['parameters'] = {
+                            **node.get('parameters', {}),
+                            'path': 'onboarding',
+                            'responseMode': 'responseNode',
+                            'options': {
+                                'allowUnauthorizedAccess': True,
+                                'responseCode': 200,
+                                'responseData': 'allEntries'
+                            }
+                        }
+                    
+                    transformed_nodes.append(node)
+                    
+                    # Add executeWorkflow node if not already added
+                    execute_node = self._create_execute_workflow_node(node)
+                    execute_node_id = execute_node['id']
+                    if execute_node_id not in execute_nodes:
+                        execute_nodes.add(execute_node_id)
+                        transformed_nodes.append(execute_node)
+                        
+                        # Update connections to point to executeWorkflow node
+                        if 'connections' in workflow:
+                            node_name = node.get('name')
+                            if node_name in workflow['connections']:
+                                workflow['connections'][execute_node['name']] = workflow['connections'][node_name]
+                                # Keep the original connection for backward compatibility
+                                # del workflow['connections'][node_name]
+                # If it's a Google service node, transform it
+                elif any(service in node_type for service in self.supported_nodes.keys()):
+                    transformer = self.supported_nodes[next(
+                        service for service in self.supported_nodes.keys() 
+                        if service in node_type
+                    )]
+                    transformed_node = transformer(node)
                     transformed_nodes.append(transformed_node)
                 else:
-                    # Keep unsupported nodes as-is with a warning
-                    logger.warning(f"Unsupported node type: {node_type}")
+                    # For non-Google nodes, keep as is but ensure n8n-nodes-base prefix
+                    if not node_type.startswith('n8n-nodes-base.'):
+                        node['type'] = f"n8n-nodes-base.{node_type}"
                     transformed_nodes.append(node)
+                
+                logger.info(f"Processed node: {node.get('name')} (type: {node.get('type')})")
             
-            # Log the transformed workflow for testing
-            logger.info("Transformed workflow:")
-            logger.info(json.dumps(transformed_nodes, indent=2))
+            # Remove duplicate nodes
+            seen_ids = set()
+            unique_nodes = []
+            for node in transformed_nodes:
+                node_id = node.get('id')
+                if node_id not in seen_ids:
+                    seen_ids.add(node_id)
+                    unique_nodes.append(node)
             
-            # Log the internal metadata mapping
-            logger.info("Node metadata mapping:")
-            logger.info(json.dumps(self._node_metadata, indent=2))
+            # Update workflow with transformed nodes
+            workflow['nodes'] = unique_nodes
             
-            return {
-                **workflow,
-                'nodes': transformed_nodes
-            }
+            # Add trigger parameters if not present
+            if 'triggerParameters' not in workflow:
+                workflow['triggerParameters'] = {
+                    'email': {'type': 'string', 'required': True},
+                    'preferredTime': {'type': 'string', 'format': 'date-time', 'required': True},
+                    'company': {'type': 'string', 'required': True}
+                }
+            
+            logger.info("Transformation complete")
+            logger.info(f"Node metadata mapping: {json.dumps(self._node_metadata, indent=2)}")
+            
+            return workflow
             
         except Exception as e:
             logger.error(f"Error transforming workflow: {str(e)}")
@@ -87,37 +142,45 @@ class GoogleWorkflowTransformer:
     def _is_trigger_node(self, node: Dict[str, Any]) -> bool:
         """Check if a node is a trigger node."""
         node_type = node.get('type', '').lower()
-        return 'trigger' in node_type or node_type == 'n8n-nodes-base.webhook'
+        return ('trigger' in node_type or 
+                node_type == 'n8n-nodes-base.webhook' or 
+                node_type == 'n8n-nodes-base.scheduletrigger' or
+                node_type == 'scheduletrigger')
     
-    def _transform_trigger_node(self, node: Dict[str, Any]) -> Dict[str, Any]:
-        """Transform any trigger node (including webhooks) to an 'executed by other workflow' trigger."""
-        node_id = str(node.get('id', ''))
-        node_name = node.get('name', 'Workflow Trigger')
+    def _create_execute_workflow_node(self, trigger_node: Dict[str, Any]) -> Dict[str, Any]:
+        """Create an executeWorkflow node from a trigger node."""
+        node_id = str(trigger_node.get('id', '')) + '_execute'
+        node_name = trigger_node.get('name', 'Workflow Trigger') + ' Execute'
         
         # Store metadata about the original trigger
         self._node_metadata[node_id] = {
-            'original_type': node.get('type'),
-            'original_parameters': node.get('parameters', {}),
-            'transformed_type': 'n8n-nodes-base.executeWorkflow'
+            'original_type': trigger_node.get('type'),
+            'original_parameters': trigger_node.get('parameters', {}),
+            'transformed_type': 'n8n-nodes-base.executeWorkflow',
+            'webhook_url': 'https://blopit.app.n8n.cloud/webhook/execute'  # Base webhook URL
         }
         
-        # Convert all trigger nodes to executeWorkflow
+        # Create executeWorkflow node with webhook configuration
         return {
             'id': node_id,
             'name': node_name,
             'type': 'n8n-nodes-base.executeWorkflow',
             'parameters': {
-                'workflowId': '',  # Will be set by the executing workflow
-                'executionMode': 'manually',
-                'triggerTimes': '1',
+                'workflowId': '',  # This will be set by the executor workflow
+                'jsonParameters': True,
                 'arguments': {
-                    'name': node_name,
-                    'original_type': node.get('type'),
-                    'original_parameters': json.dumps(node.get('parameters', {}))
+                    'data': {
+                        'email': '${data.email}',
+                        'preferredTime': '${data.preferredTime}',
+                        'company': '${data.company}'
+                    }
                 }
             },
             'typeVersion': 1,
-            'position': node.get('position', [0, 0])
+            'position': [
+                trigger_node.get('position', [0, 0])[0] + 200,  # Place it to the right
+                trigger_node.get('position', [0, 0])[1]
+            ]
         }
     
     def _transform_gmail_node(self, node: Dict[str, Any]) -> Dict[str, Any]:
