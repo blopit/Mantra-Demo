@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Mantra - Your Account</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -11,25 +12,25 @@
             padding: 0;
             background-color: #f5f5f5;
         }
-        
+
         .container {
             max-width: 1200px;
             margin: 0 auto;
             padding: 20px;
         }
-        
+
         .header {
             background-color: white;
             padding: 20px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
             margin-bottom: 30px;
         }
-        
+
         .header h1 {
             margin: 0;
             color: #333;
         }
-        
+
         .section {
             background-color: white;
             border-radius: 8px;
@@ -37,21 +38,21 @@
             margin-bottom: 30px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
-        
+
         .section h2 {
             margin-top: 0;
             color: #333;
             border-bottom: 2px solid #f5f5f5;
             padding-bottom: 10px;
         }
-        
+
         .services-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
             gap: 20px;
             margin-top: 20px;
         }
-        
+
         .service-card {
             background: #f8f9fa;
             border-radius: 8px;
@@ -61,41 +62,41 @@
             justify-content: space-between;
             transition: transform 0.2s;
         }
-        
+
         .service-card:hover {
             transform: translateY(-2px);
         }
-        
+
         .service-info {
             display: flex;
             align-items: center;
             gap: 15px;
         }
-        
+
         .service-icon {
             width: 24px;
             height: 24px;
         }
-        
+
         .service-details h3 {
             margin: 0;
             font-size: 16px;
             color: #333;
         }
-        
+
         .service-details p {
             margin: 5px 0 0;
             font-size: 14px;
             color: #666;
         }
-        
+
         .workflows-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
             gap: 20px;
             margin-top: 20px;
         }
-        
+
         .workflow-card {
             background: white;
             border: 1px solid #eee;
@@ -103,22 +104,22 @@
             padding: 20px;
             transition: transform 0.2s;
         }
-        
+
         .workflow-card:hover {
             transform: translateY(-2px);
         }
-        
+
         .workflow-card h3 {
             margin: 0 0 10px 0;
             color: #333;
         }
-        
+
         .workflow-card p {
             margin: 0;
             color: #666;
             font-size: 14px;
         }
-        
+
         .btn {
             padding: 8px 16px;
             border-radius: 4px;
@@ -127,45 +128,45 @@
             font-size: 14px;
             transition: all 0.3s ease;
         }
-        
+
         .btn-primary {
             background-color: #007bff;
             color: white;
         }
-        
+
         .btn-danger {
             background-color: #dc3545;
             color: white;
         }
-        
+
         .btn:hover {
             opacity: 0.9;
         }
-        
+
         .user-profile {
             display: flex;
             align-items: center;
             gap: 15px;
             margin-bottom: 20px;
         }
-        
+
         .user-profile img {
             width: 50px;
             height: 50px;
             border-radius: 50%;
         }
-        
+
         .user-profile .user-info h2 {
             margin: 0;
             border: none;
             padding: 0;
         }
-        
+
         .user-profile .user-info p {
             margin: 5px 0 0;
             color: #666;
         }
-        
+
         .modal {
             display: none;
             position: fixed;
@@ -176,7 +177,7 @@
             background: rgba(0,0,0,0.5);
             z-index: 1000;
         }
-        
+
         .modal-content {
             position: relative;
             background: white;
@@ -187,7 +188,7 @@
             border-radius: 8px;
             box-shadow: 0 2px 10px rgba(0,0,0,0.1);
         }
-        
+
         .close {
             position: absolute;
             right: 20px;
@@ -196,11 +197,11 @@
             cursor: pointer;
             color: #666;
         }
-        
+
         .workflow-editor {
             margin-top: 20px;
         }
-        
+
         .workflow-editor textarea {
             width: 100%;
             min-height: 300px;
@@ -210,13 +211,13 @@
             border-radius: 4px;
             font-family: monospace;
         }
-        
+
         .workflow-actions {
             display: flex;
             gap: 10px;
             margin-top: 20px;
         }
-        
+
         .workflow-status {
             display: inline-block;
             padding: 4px 8px;
@@ -224,36 +225,36 @@
             font-size: 12px;
             font-weight: bold;
         }
-        
+
         .status-active {
             background: #e3fcef;
             color: #0a6c3b;
         }
-        
+
         .status-paused {
             background: #fff3cd;
             color: #856404;
         }
-        
+
         .status-error {
             background: #f8d7da;
             color: #721c24;
         }
-        
+
         .add-workflow {
             margin-bottom: 20px;
         }
-        
+
         .tab-container {
             margin-bottom: 20px;
         }
-        
+
         .tab-buttons {
             display: flex;
             gap: 10px;
             margin-bottom: 20px;
         }
-        
+
         .tab-button {
             padding: 8px 16px;
             border: none;
@@ -261,64 +262,58 @@
             border-radius: 4px;
             cursor: pointer;
         }
-        
+
         .tab-button.active {
             background: #007bff;
             color: white;
         }
-        
+
         .tab-content {
             display: none;
         }
-        
+
         .tab-content.active {
             display: block;
         }
-        
+
         .notification {
             position: fixed;
             top: 20px;
             right: 20px;
             z-index: 1000;
             min-width: 300px;
-            max-width: 500px;
+            max-width: 450px;
             padding: 15px;
             border-radius: 4px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
             animation: slideIn 0.3s ease-out;
         }
-        
+
         .notification.success {
             background-color: #4caf50;
             color: white;
         }
-        
+
         .notification.error {
             background-color: #f44336;
             color: white;
         }
-        
+
         .notification-content {
             display: flex;
-            align-items: center;
             justify-content: space-between;
+            align-items: center;
         }
-        
-        .notification-message {
-            flex-grow: 1;
-            margin-right: 10px;
-        }
-        
+
         .notification-close {
             background: none;
             border: none;
             color: white;
             font-size: 20px;
             cursor: pointer;
-            padding: 0;
-            line-height: 1;
+            padding: 0 5px;
         }
-        
+
         @keyframes slideIn {
             from {
                 transform: translateX(100%);
@@ -328,6 +323,20 @@
                 transform: translateX(0);
                 opacity: 1;
             }
+        }
+
+        .loading-spinner {
+            margin-left: 8px;
+        }
+
+        .loading-spinner i {
+            color: white;
+            font-size: 14px;
+        }
+
+        .btn:disabled {
+            opacity: 0.7;
+            cursor: not-allowed;
         }
     </style>
 </head>
@@ -343,7 +352,7 @@
             </div>
         </div>
     </div>
-    
+
     <div class="container">
         <div class="section">
             <h2>Connected Services</h2>
@@ -361,7 +370,7 @@
                         <button id="googleSignInButton" class="btn btn-primary" onclick="initiateGoogleSignIn()" style="display: none;">Sign In</button>
                     </div>
                 </div>
-                
+
                 <div class="service-card" style="opacity: 0.5;">
                     <div class="service-info">
                         <img src="https://upload.wikimedia.org/wikipedia/commons/4/44/Microsoft_logo.svg" alt="Microsoft" class="service-icon">
@@ -371,7 +380,7 @@
                         </div>
                     </div>
                 </div>
-                
+
                 <div class="service-card" style="opacity: 0.5;">
                     <div class="service-info">
                         <img src="https://upload.wikimedia.org/wikipedia/commons/e/e9/Slack_icon_2015.svg" alt="Slack" class="service-icon">
@@ -383,31 +392,31 @@
                 </div>
             </div>
         </div>
-        
+
         <div class="section">
             <h2>Workflow Management</h2>
-            
+
             <div class="tab-container">
                 <div class="tab-buttons">
                     <button class="tab-button active" onclick="switchTab('installed')">My Installed Mantras</button>
                     <button class="tab-button" onclick="switchTab('available')">Available Mantras</button>
                     <button class="tab-button" onclick="switchTab('create')">Create New Mantra</button>
                 </div>
-                
+
                 <!-- Installed Mantras Tab -->
                 <div id="installed-tab" class="tab-content active">
                     <div id="installed-mantras" class="workflows-grid">
                         <!-- Installed mantras will be loaded here -->
                     </div>
                 </div>
-                
+
                 <!-- Available Mantras Tab -->
                 <div id="available-tab" class="tab-content">
                     <div id="available-mantras" class="workflows-grid">
                         <!-- Available mantras will be loaded here -->
                     </div>
                 </div>
-                
+
                 <!-- Create New Mantra Tab -->
                 <div id="create-tab" class="tab-content">
                     <div class="workflow-editor">
@@ -446,18 +455,18 @@
     <script>
         // Get user info from localStorage
         const userProfile = JSON.parse(localStorage.getItem('userProfile') || '{}');
-        
+
         // Check both localStorage and session data
         async function checkAuthentication() {
             try {
                 const response = await fetch('/api/google/status');
                 const data = await response.json();
-                
+
                 if (!data.connected) {
                     window.location.href = '/signin?status=Please sign in to access your account';
                     return;
                 }
-                
+
                 // If we have session data but no localStorage data, try to sync
                 if (data.connected && (!userProfile || !userProfile.id)) {
                     const user = data.user;
@@ -491,7 +500,7 @@
             document.querySelectorAll('.tab-button').forEach(button => {
                 button.classList.remove('active');
             });
-            
+
             // Show selected tab
             document.getElementById(`${tabName}-tab`).classList.add('active');
             document.querySelector(`[onclick="switchTab('${tabName}')"]`).classList.add('active');
@@ -516,7 +525,7 @@
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
                 const mantras = await response.json();
-                
+
                 const container = document.getElementById('installed-mantras');
                 container.innerHTML = mantras.map(mantra => `
                     <div class="workflow-card">
@@ -541,17 +550,22 @@
             try {
                 const response = await fetch('/api/mantras');
                 const data = await response.json();
-                
+
                 // Check if the response has the expected structure
                 const mantras = data.data?.mantras || [];
-                
+
                 const container = document.getElementById('available-mantras');
                 container.innerHTML = mantras.map(mantra => `
                     <div class="workflow-card">
                         <h3>${mantra.name}</h3>
                         <p>${mantra.description}</p>
                         <p style="margin-top: 10px;">
-                            <button class="btn btn-primary" data-mantra-id="${mantra.id}" onclick="installMantra('${mantra.id}')">Install Mantra</button>
+                            <button class="btn btn-primary" id="install-btn-${mantra.id}" onclick="installMantra('${mantra.id}')" data-mantra-id="${mantra.id}">
+                                <span class="btn-text">Install Mantra</span>
+                                <span class="loading-spinner" style="display: none;">
+                                    <i class="fas fa-spinner fa-spin"></i>
+                                </span>
+                            </button>
                             <button class="btn btn-danger" onclick="deleteWorkflow('${mantra.id}')">Delete</button>
                         </p>
                     </div>
@@ -583,7 +597,7 @@
             const name = document.getElementById('workflow-name').value;
             const description = document.getElementById('workflow-description').value;
             const workflowJsonStr = document.getElementById('workflow-json').value;
-            
+
             try {
                 // Validate required fields
                 if (!name || !description || !workflowJsonStr) {
@@ -593,7 +607,7 @@
                 // Get user info from session
                 const response = await fetch('/api/google/status');
                 const userStatus = await response.json();
-                
+
                 if (!userStatus.connected || !userStatus.user) {
                     throw new Error('Please log in to create a workflow');
                 }
@@ -611,7 +625,7 @@
                 }
 
                 console.log('Creating workflow with:', { name, description, workflowJson });
-                
+
                 // Send request with all fields in the body
                 const createResponse = await fetch('/api/mantras/', {
                     method: 'POST',
@@ -625,7 +639,7 @@
                         workflow_json: workflowJson
                     })
                 });
-                
+
                 if (!createResponse.ok) {
                     const errorData = await createResponse.json();
                     console.error('Server error response:', errorData);
@@ -634,19 +648,19 @@
                     }
                     throw new Error(errorData.detail || 'Failed to create workflow');
                 }
-                
+
                 const result = await createResponse.json();
                 console.log('Workflow created successfully:', result);
-                
+
                 alert('Workflow created successfully!');
                 loadAvailableMantras();
                 switchTab('available');
-                
+
                 // Clear form
                 document.getElementById('workflow-name').value = '';
                 document.getElementById('workflow-description').value = '';
                 document.getElementById('workflow-json').value = '';
-                
+
             } catch (error) {
                 console.error('Error creating workflow:', error);
                 alert('Error creating workflow: ' + error.message);
@@ -660,7 +674,16 @@
                 return;
             }
 
+            const installButton = document.getElementById(`install-btn-${mantraId}`);
+            const buttonText = installButton.querySelector('.btn-text');
+            const loadingSpinner = installButton.querySelector('.loading-spinner');
+
             try {
+                // Disable button and show loading state
+                installButton.disabled = true;
+                buttonText.style.display = 'none';
+                loadingSpinner.style.display = 'inline-block';
+
                 const response = await fetch(`/api/mantras/${mantraId}/install?user_id=${userProfile.id}`, {
                     method: 'POST'
                 });
@@ -672,20 +695,20 @@
                         const installationsResponse = await fetch('/api/mantras/users/' + userProfile.id);
                         const installations = await installationsResponse.json();
                         const existingInstallation = installations.find(inst => inst.mantra_id === mantraId);
-                        
+
                         if (existingInstallation) {
                             // Uninstall the existing installation
                             await fetch(`/api/mantras/installations/${existingInstallation.id}`, {
                                 method: 'DELETE'
                             });
-                            
+
                             // Try installing again
                             const retryResponse = await fetch(`/api/mantras/${mantraId}/install?user_id=${userProfile.id}`, {
                                 method: 'POST'
                             });
-                            
+
                             if (retryResponse.ok) {
-                                alert('Mantra reinstalled successfully!');
+                                showNotification('success', 'Mantra reinstalled successfully!');
                                 loadInstalledMantras();
                                 return;
                             } else {
@@ -695,28 +718,33 @@
                     }
                     return;
                 }
-                
+
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
 
-                alert('Mantra installed successfully!');
+                showNotification('success', 'Mantra installed successfully!');
                 loadInstalledMantras();
             } catch (error) {
                 console.error('Error installing mantra:', error);
-                alert('Error installing mantra: ' + error.message);
+                showNotification('error', 'Error installing mantra: ' + error.message);
+            } finally {
+                // Reset button state
+                installButton.disabled = false;
+                buttonText.style.display = 'inline-block';
+                loadingSpinner.style.display = 'none';
             }
         }
 
         // Uninstall workflow
         async function uninstallWorkflow(installationId) {
             if (!confirm('Are you sure you want to uninstall this mantra?')) return;
-            
+
             try {
                 const response = await fetch(`/api/mantras/installations/${installationId}`, {
                     method: 'DELETE'
                 });
-                
+
                 if (response.ok) {
                     alert('Mantra uninstalled successfully!');
                     loadInstalledMantras();
@@ -741,7 +769,7 @@
                         data: {}  // Add any required input data here
                     })
                 });
-                
+
                 const result = await response.json();
                 alert('Workflow executed successfully!');
                 console.log('Execution result:', result);
@@ -756,11 +784,11 @@
             try {
                 const response = await fetch('/api/google/status');
                 const data = await response.json();
-                
+
                 const statusElement = document.getElementById('googleStatus');
                 const disconnectButton = document.getElementById('googleButton');
                 const signInButton = document.getElementById('googleSignInButton');
-                
+
                 if (data.connected) {
                     statusElement.textContent = 'Connected';
                     statusElement.style.color = '#28a745';
@@ -780,7 +808,7 @@
         // Disconnect service
         async function disconnectService(service) {
             if (!confirm(`Are you sure you want to disconnect ${service}?`)) return;
-            
+
             try {
                 const response = await fetch(`/api/google-integrations/disconnect`, {
                     method: 'POST',
@@ -788,7 +816,7 @@
                         'Content-Type': 'application/json'
                     }
                 });
-                
+
                 if (response.ok) {
                     alert(`${service} disconnected successfully!`);
                     checkGoogleStatus();
@@ -804,76 +832,127 @@
         // Load sample workflow
         function loadSampleWorkflow() {
             const sampleWorkflow = {
-                "nodes": [
-                    {
-                        "id": "1",
-                        "type": "n8n-nodes-base.webhook",
-                        "name": "Webhook Trigger",
-                        "parameters": {
-                            "path": "onboarding",
-                            "responseMode": "responseNode",
-                            "options": {}
-                        }
-                    },
-                    {
-                        "id": "2",
-                        "type": "n8n-nodes-base.gmail",
-                        "name": "Send Email",
-                        "parameters": {
-                            "operation": "sendEmail",
-                            "to": "{{'{{$node[\"Webhook Trigger\"].data.email}}'}}",
-                            "subject": "Welcome to Mantra!",
-                            "text": "Thanks for trying out our workflow automation!"
-                        }
-                    },
-                    {
-                        "id": "3", 
-                        "type": "n8n-nodes-base.googleCalendar",
-                        "name": "Create Event",
-                        "parameters": {
-                            "operation": "createEvent",
-                            "calendar": "primary",
-                            "summary": "Onboarding Call",
-                            "description": "Welcome call with new user",
-                            "start": "{{'{{$node[\"Webhook Trigger\"].data.preferredTime}}'}}",
-                            "end": "{{'{{$node[\"Webhook Trigger\"].data.preferredTime + 3600000}}'}}"
-                        }
-                    },
-                    {
-                        "id": "4",
-                        "type": "n8n-nodes-base.googleDrive",
-                        "name": "Create Folder",
-                        "parameters": {
-                            "operation": "createFolder",
-                            "name": "{{'{{$node[\"Webhook Trigger\"].data.company}}'}} Resources",
-                            "parent": "root"
-                        }
-                    }
-                ],
-                "connections": {
-                    "Webhook Trigger": {
-                        "main": [["Send Email", 0]]
-                    },
-                    "Send Email": {
-                        "main": [["Create Event", 0]]
-                    },
-                    "Create Event": {
-                        "main": [["Create Folder", 0]]
-                    }
-                },
-                "settings": {
-                    "saveExecutionProgress": true,
-                    "saveManualExecutions": true
-                },
-                "triggerParameters": {
-                    "email": {"type": "string", "required": true},
-                    "company": {"type": "string", "required": true},
-                    "preferredTime": {"type": "string", "format": "date-time", "required": true}
-                }
-            };
-            
-            document.getElementById('workflow-name').value = 'Onboarding Automation';
-            document.getElementById('workflow-description').value = 'Automates the onboarding process by sending a welcome email, scheduling an onboarding call, and creating a resource folder';
+  "name": "Email Summary Agent ",
+  "nodes": [
+    {
+      "parameters": {
+        "operation": "getAll",
+        "returnAll": true,
+        "filters": {
+          "q": "{% raw %}{{ (() => { const yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1); return `isb.quantana@quantana.in after:${yesterday.getFullYear()}/${(yesterday.getMonth() + 1).toString().padStart(2, '0')}/${yesterday.getDate().toString().padStart(2, '0')}`; })() }}{% endraw %}"
+        }
+      },
+      "id": "dd3e4b10-187b-45ce-b999-f0143e5af134",
+      "name": "Fetch Emails - Past 24 Hours",
+      "type": "n8n-nodes-base.gmail",
+      "position": [
+        680,
+        380
+      ],
+      "webhookId": "20f1d11d-8a69-43f3-9323-33eaf1b3b600",
+      "typeVersion": 2.1
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "include": "specifiedFields",
+        "fieldsToInclude": "id, From, To, CC, snippet",
+        "options": {}
+      },
+      "id": "4a8fdfd9-93d7-43a2-92b0-88d845f217bf",
+      "name": "Organize Email Data - Morning",
+      "type": "n8n-nodes-base.aggregate",
+      "position": [
+        920,
+        380
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "sendTo": "team-email@example.com",
+        "subject": "{% raw %}ESAgent - {{ new Date(new Date().setDate(new Date().getDate() - 1)).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) }}-00:00 to {{ new Date(new Date().setDate(new Date().getDate())).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) }}-07:00AM{% endraw %}",
+        "message": "{% raw %}=<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n    <meta charset=\"UTF-8\">\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n    <title>Email Summary - isbonline@quantana.in</title>\n    <style>\n        body {\n            font-family: Arial, sans-serif;\n            margin: 0;\n            padding: 0;\n            background-color: #f9f9f9;\n            color: #333;\n            line-height: 1.6;\n        }\n        .email-container {\n            max-width: 600px;\n            margin: 20px auto;\n            background: #ffffff;\n            border: 1px solid #ddd;\n            border-radius: 10px;\n            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);\n        }\n        .email-header {\n            background-color: #0073e6;\n            color: #fff;\n            padding: 20px;\n            text-align: center;\n            border-top-left-radius: 10px;\n            border-top-right-radius: 10px;\n        }\n        .email-header h1 {\n            margin: 0;\n            font-size: 24px;\n        }\n        .email-content {\n            padding: 20px;\n        }\n        .section-title {\n            font-size: 20px;\n            color: #0073e6;\n            margin-bottom: 10px;\n        }\n        ul {\n            list-style: none;\n            padding: 0;\n        }\n        li {\n            margin-bottom: 15px;\n            padding: 10px;\n            background: #f5f5f5;\n            border-radius: 5px;\n        }\n        .email-meta {\n            font-size: 14px;\n            color: #666;\n            margin-bottom: 5px;\n        }\n        .email-snippet {\n            font-size: 16px;\n            color: #333;\n        }\n        .footer {\n            text-align: center;\n            padding: 20px;\n            color: #666;\n            font-size: 14px;\n        }\n    </style>\n</head>\n<body>\n    <div class=\"email-container\">\n        <div class=\"email-header\">\n            <h1>Email Summary Report</h1>\n        </div>\n        <div class=\"email-content\">\n            <div class=\"section-title\">Emails from Last 24 Hours</div>\n            <ul>\n                {{#each $json}}\n                <li>\n                    <div class=\"email-meta\">\n                        <strong>From:</strong> {{this.From}}\n                        <strong>To:</strong> {{this.To}}\n                        {{#if this.CC}}<br><strong>CC:</strong> {{this.CC}}{{/if}}\n                    </div>\n                    <div class=\"email-snippet\">{{this.snippet}}</div>\n                </li>\n                {{/each}}\n            </ul>\n        </div>\n        <div class=\"footer\">\n            <p>Generated by Email Summary Agent</p>\n            <p>© 2024 Quantana Technology Pvt Ltd</p>\n        </div>\n    </div>\n</body>\n</html>{% endraw %}",
+        "options": {
+          "appendAttribution": false,
+          "ccList": "cc-list@example.com",
+          "replyToSenderOnly": false
+        }
+      },
+      "id": "4aa68ee8-d38f-418a-9f20-6cc76850c638",
+      "name": "Send Summary - Morning",
+      "type": "n8n-nodes-base.gmail",
+      "position": [
+        1160,
+        380
+      ],
+      "webhookId": "83f2aeb9-7b6c-4336-b5ed-8acfcd259850",
+      "typeVersion": 2.1
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        440,
+        380
+      ],
+      "id": "bb4a81e0-2e73-431d-ad62-309409572494",
+      "name": "When Executed by Another Workflow"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Fetch Emails - Past 24 Hours": {
+      "main": [
+        [
+          {
+            "node": "Organize Email Data - Morning",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Organize Email Data - Morning": {
+      "main": [
+        [
+          {
+            "node": "Send Summary - Morning",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Fetch Emails - Past 24 Hours",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "",
+  "meta": {
+    "templateId": "2722",
+    "instanceId": "c947f5b39ed9e27d4ff512e0ad5572df35744fcef92741bf46867f4d3e968cf1"
+  },
+  "tags": []
+};
+
+            document.getElementById('workflow-name').value = 'Email Summary Agent';
+            document.getElementById('workflow-description').value = 'Fetches emails from the last 24 hours, organizes them, and sends a summary email';
             document.getElementById('workflow-json').value = JSON.stringify(sampleWorkflow, null, 2);
         }
 
@@ -882,7 +961,7 @@
             // Load initial data
             loadInstalledMantras();
             loadAvailableMantras();
-            
+
             // Check Google connection status
             checkGoogleStatus();
         });
@@ -891,7 +970,7 @@
             try {
                 const response = await fetch('/api/google/auth');
                 const data = await response.json();
-                
+
                 if (data.auth_url) {
                     window.location.href = data.auth_url;
                 } else {
@@ -914,7 +993,7 @@
                 </div>
             `;
             document.body.appendChild(notification);
-            
+
             // Auto-hide after 5 seconds
             setTimeout(() => {
                 notification.remove();
@@ -924,17 +1003,17 @@
         // Delete workflow
         async function deleteWorkflow(mantraId) {
             if (!confirm('Are you sure you want to delete this mantra? This action cannot be undone.')) return;
-            
+
             try {
                 // Get the current user's ID from the session
                 const userResponse = await fetch('/api/google/status');
                 const userData = await userResponse.json();
                 const userId = userData.user.id;
-                
+
                 const response = await fetch(`/api/mantras/${mantraId}?user_id=${userId}`, {
                     method: 'DELETE'
                 });
-                
+
                 if (response.ok) {
                     showNotification('success', 'Mantra deleted successfully!');
                     loadAvailableMantras(); // Refresh the list
@@ -949,4 +1028,4 @@
         }
     </script>
 </body>
-</html> 
+</html>
