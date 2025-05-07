@@ -355,23 +355,26 @@ class MantraService:
                     detail=f"Active installation {installation_id} not found for user {user_id}"
                 )
             
-            # Deactivate workflow in n8n
-            try:
-                if installation.n8n_workflow_id:
+            # Delete workflow in n8n first
+            if installation.n8n_workflow_id:
+                try:
+                    # Try to deactivate first, but don't fail if it doesn't work
                     try:
                         await self.n8n_service.deactivate_workflow(installation.n8n_workflow_id)
                         logger.info(f"Deactivated n8n workflow {installation.n8n_workflow_id}")
                     except Exception as e:
                         logger.warning(f"Failed to deactivate n8n workflow: {str(e)}")
                     
-                    try:
-                        await self.n8n_service.delete_workflow(installation.n8n_workflow_id)
-                        logger.info(f"Deleted n8n workflow {installation.n8n_workflow_id}")
-                    except Exception as e:
-                        logger.warning(f"Failed to delete n8n workflow: {str(e)}")
-            except Exception as e:
-                logger.warning(f"Error during n8n workflow cleanup: {str(e)}")
-                # Continue with installation cleanup even if n8n operations fail
+                    # Delete workflow - this must succeed
+                    await self.n8n_service.delete_workflow(installation.n8n_workflow_id)
+                    logger.info(f"Deleted n8n workflow {installation.n8n_workflow_id}")
+                except Exception as e:
+                    logger.error(f"Failed to delete n8n workflow: {str(e)}")
+                    await self.db_session.rollback()
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail=f"Failed to delete n8n workflow: {str(e)}"
+                    )
             
             # Mark installation as inactive
             installation.is_active = False
@@ -384,6 +387,7 @@ class MantraService:
             raise
         except Exception as e:
             logger.error(f"Error uninstalling mantra: {str(e)}")
+            await self.db_session.rollback()
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Error uninstalling mantra: {str(e)}"
@@ -723,12 +727,24 @@ class MantraService:
             )
             installations = result.scalars().all()
             
+            # Track failed uninstalls
+            failed_uninstalls = []
+            
             # Uninstall all active installations
             for installation in installations:
                 try:
                     await self.uninstall_mantra(str(installation.id), installation.user_id)
                 except Exception as e:
-                    logger.warning(f"Failed to uninstall mantra installation {installation.id}: {str(e)}")
+                    logger.error(f"Failed to uninstall mantra installation {installation.id}: {str(e)}")
+                    failed_uninstalls.append(str(installation.id))
+            
+            # If any uninstalls failed, rollback and raise error
+            if failed_uninstalls:
+                await self.db_session.rollback()
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"Failed to uninstall some installations: {', '.join(failed_uninstalls)}"
+                )
             
             # Mark mantra as inactive (soft delete)
             mantra.is_active = False
@@ -742,6 +758,7 @@ class MantraService:
             raise
         except Exception as e:
             logger.error(f"Error deleting mantra: {str(e)}")
+            await self.db_session.rollback()
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Error deleting mantra: {str(e)}"
