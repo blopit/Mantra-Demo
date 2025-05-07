@@ -11,18 +11,20 @@
                     "path": "onboarding",
                     "responseMode": "responseNode",
                     "options": {}
-                }
+                },
+                "position": [240, 380]
             },
             {
                 "id": "2",
                 "type": "n8n-nodes-base.gmail",
                 "name": "Send Email",
                 "parameters": {
-                    "operation": "sendEmail",
-                    "to": "${trigger.email}",
+                    "operation": "send",
+                    "sendTo": "${trigger.email}",
                     "subject": "Welcome to Mantra!",
-                    "text": "Thanks for trying out our workflow automation!"
-                }
+                    "message": "Thanks for trying out our workflow automation!"
+                },
+                "position": [440, 380]
             },
             {
                 "id": "3",
@@ -35,7 +37,8 @@
                     "description": "Welcome call with new user",
                     "start": "${trigger.preferredTime}",
                     "end": "${addHours(trigger.preferredTime, 1)}"
-                }
+                },
+                "position": [640, 380]
             }
         ],
         "connections": {
@@ -55,4 +58,4 @@
         }
     },
     "user_id": "test_user_id"
-} 
+}
