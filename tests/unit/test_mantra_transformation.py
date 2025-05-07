@@ -94,13 +94,17 @@ async def test_webhook_transformation(mantra_service, test_user, mock_db_session
 
     # Verify the transformation
     transformed_nodes = mantra.workflow_json["nodes"]
-    trigger_node = next(node for node in transformed_nodes if node["id"] == "1")
     
-    assert trigger_node["type"] == "n8n-nodes-base.executeWorkflow"
-    assert "workflowId" in trigger_node["parameters"]
-    assert trigger_node["parameters"]["executionMode"] == "manually"
-    assert "original_type" in trigger_node["parameters"]["arguments"]
-    assert trigger_node["parameters"]["arguments"]["original_type"] == "n8n-nodes-base.webhook"
+    # Should only have one trigger node
+    trigger_nodes = [
+        node for node in transformed_nodes 
+        if node["type"] == "n8n-nodes-base.executeWorkflowTrigger"
+    ]
+    assert len(trigger_nodes) == 1
+    trigger_node = trigger_nodes[0]
+    
+    assert trigger_node["name"] == "When Executed by Another Workflow"
+    assert trigger_node["typeVersion"] >= 1
 
 @pytest.mark.asyncio
 async def test_multiple_trigger_transformation(mantra_service, test_user, mock_db_session):
@@ -158,16 +162,17 @@ async def test_multiple_trigger_transformation(mantra_service, test_user, mock_d
 
     # Verify all triggers were transformed
     transformed_nodes = mantra.workflow_json["nodes"]
-    webhook_node = next(node for node in transformed_nodes if node["id"] == "1")
-    schedule_node = next(node for node in transformed_nodes if node["id"] == "2")
     
-    # Check webhook transformation
-    assert webhook_node["type"] == "n8n-nodes-base.executeWorkflow"
-    assert webhook_node["parameters"]["arguments"]["original_type"] == "n8n-nodes-base.webhook"
+    # Should only have one trigger node
+    trigger_nodes = [
+        node for node in transformed_nodes 
+        if node["type"] == "n8n-nodes-base.executeWorkflowTrigger"
+    ]
+    assert len(trigger_nodes) == 1
+    trigger_node = trigger_nodes[0]
     
-    # Check schedule trigger transformation
-    assert schedule_node["type"] == "n8n-nodes-base.executeWorkflow"
-    assert schedule_node["parameters"]["arguments"]["original_type"] == "n8n-nodes-base.scheduleTrigger"
+    assert trigger_node["name"] == "When Executed by Another Workflow"
+    assert trigger_node["typeVersion"] >= 1
 
 @pytest.mark.asyncio
 async def test_non_trigger_nodes_preserved(mantra_service, test_user, mock_db_session):
@@ -214,6 +219,17 @@ async def test_non_trigger_nodes_preserved(mantra_service, test_user, mock_db_se
 
     # Verify non-trigger nodes were preserved
     transformed_nodes = mantra.workflow_json["nodes"]
+    
+    # Should have exactly one trigger node (our default one)
+    trigger_nodes = [
+        node for node in transformed_nodes 
+        if node["type"] == "n8n-nodes-base.executeWorkflowTrigger"
+    ]
+    assert len(trigger_nodes) == 1
+    trigger_node = trigger_nodes[0]
+    assert trigger_node["name"] == "When Executed by Another Workflow"
+    
+    # Original nodes should be preserved
     email_node = next(node for node in transformed_nodes if node["id"] == "1")
     calendar_node = next(node for node in transformed_nodes if node["id"] == "2")
     
