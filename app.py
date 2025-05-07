@@ -21,8 +21,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 from dotenv import load_dotenv
 from sqlalchemy.orm import Session
-from src.database.db import get_db
+from src.utils.database import init_db, get_db
 from src.models.google_integration import GoogleIntegration
+from src.middleware.error_handler import add_error_handlers
 
 # Load environment variables
 load_dotenv()
@@ -53,17 +54,28 @@ app.add_middleware(
 # Add session middleware
 app.add_middleware(
     SessionMiddleware,
-    secret_key=os.getenv("SESSION_SECRET_KEY", "your-secret-key-here"),  # Change this to a secure secret key
-    max_age=3600  # Session expiry time in seconds (1 hour)
+    secret_key=os.getenv("SESSION_SECRET_KEY", "your-secret-key"),
+    same_site="lax",  # Allows cookies in iframes from same site
+    https_only=False  # Set to True in production
 )
+
+# Add error handlers
+add_error_handlers(app)
 
 # Configure templates and static files
 templates = Jinja2Templates(directory="src/templates")
 app.mount("/static", StaticFiles(directory="src/static"), name="static")
 
-# Add error handling middleware
-from src.middleware.error_handler import add_error_handlers
-add_error_handlers(app)
+# Startup event to initialize database
+@app.on_event("startup")
+async def startup_event():
+    """Initialize database on startup."""
+    try:
+        await init_db()
+        logger.info("Database initialized successfully")
+    except Exception as e:
+        logger.error(f"Error initializing database: {e}")
+        raise
 
 # Import and include routes
 from src.routes.google_auth_consolidated import router as google_auth_router

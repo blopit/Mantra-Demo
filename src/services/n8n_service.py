@@ -368,59 +368,43 @@ class N8nService:
         
         return prepared_workflow
     
-    def _validate_workflow_structure(self, workflow_json: Dict[str, Any]) -> None:
-        """Validate the workflow structure using JSON Schema.
+    def _validate_workflow_structure(self, workflow: Dict[str, Any]) -> None:
+        """Validate the structure of a workflow.
         
         Args:
-            workflow_json: The workflow to validate
+            workflow: The workflow to validate
             
         Raises:
             ValueError: If the workflow structure is invalid
         """
-        try:
-            # Validate against JSON Schema
-            validate(instance=workflow_json, schema=WORKFLOW_SCHEMA)
+        if not isinstance(workflow, dict):
+            raise ValueError("Workflow must be a dictionary")
             
-            # Additional validation for node types
-            for node in workflow_json['nodes']:
-                # Allow Google service node types that will be handled by GoogleWorkflowTransformer
-                google_service_types = ['gmail', 'googlecalendar', 'googledrive', 'googlesheets']
-                node_type = node['type'].lower()
-                
-                if not node['type'].startswith('n8n-nodes-base.') and node_type not in google_service_types:
-                    raise ValueError(f"Invalid node type: {node['type']}. Must start with 'n8n-nodes-base.'")
-                
-                # Log node validation
-                logger.debug(f"Validated node: {json.dumps(node, indent=2)}")
+        if "nodes" not in workflow:
+            raise ValueError("Workflow must contain 'nodes' field")
             
-            # Additional validation for connections
-            if 'connections' in workflow_json and isinstance(workflow_json['connections'], dict):
-                for node_id, connection in workflow_json['connections'].items():
-                    if 'main' in connection and isinstance(connection['main'], list):
-                        # Format connections if needed
-                        for i, conn_list in enumerate(connection['main']):
-                            if isinstance(conn_list, list):
-                                for j, conn in enumerate(conn_list):
-                                    # Convert integer/string connection to object format if needed
-                                    if isinstance(conn, (int, str)):
-                                        # Create a properly formatted connection object
-                                        logger.info(f"Converting simple connection value {conn} to object format")
-                                        workflow_json['connections'][node_id]['main'][i][j] = {
-                                            "node": str(conn) if isinstance(conn, int) else conn,
-                                            "type": "main",
-                                            "index": 0
-                                        }
-                
-            logger.info(f"Successfully validated workflow with {len(workflow_json['nodes'])} nodes")
+        if not isinstance(workflow["nodes"], list):
+            raise ValueError("Workflow nodes must be a list")
             
-        except ValidationError as e:
-            error_msg = f"Workflow validation failed: {str(e)}"
-            logger.error(error_msg)
-            raise ValueError(error_msg)
-        except Exception as e:
-            error_msg = f"Error validating workflow: {str(e)}"
-            logger.error(error_msg)
-            raise ValueError(error_msg)
+        # Check for webhook nodes - these are not allowed
+        for node in workflow["nodes"]:
+            if not isinstance(node, dict):
+                raise ValueError("Each node must be a dictionary")
+                
+            node_type = node.get("type", "").lower()
+            if "webhook" in node_type:
+                raise ValueError("Webhook nodes are not allowed. All triggers must be converted to executeWorkflow nodes.")
+            
+            if "id" not in node:
+                raise ValueError("Each node must have an 'id' field")
+                
+            if "type" not in node:
+                raise ValueError("Each node must have a 'type' field")
+                
+            if "parameters" not in node:
+                raise ValueError("Each node must have a 'parameters' field")
+                
+        logger.info(f"Successfully validated workflow with {len(workflow['nodes'])} nodes")
     
     def _prepare_workflow_for_n8n(self, workflow_json: Dict[str, Any]) -> Dict[str, Any]:
         """Prepare a workflow for n8n by adding required fields and removing unsupported ones.
@@ -604,134 +588,43 @@ class N8nService:
                     detail=f"Workflow {workflow_id} not found"
                 )
             
-            # Check if workflow has webhook nodes
-            webhook_nodes = [
-                node for node in workflow.get('nodes', [])
-                if node.get('type') == 'n8n-nodes-base.webhook'
-            ]
-            has_webhook = bool(webhook_nodes)
-            
             # Activate the workflow with retries
             async with httpx.AsyncClient() as client:
                 for attempt in range(self.max_retries):
                     try:
-                        # First try POST to /activate endpoint
+                        # Send activation request
                         response = await client.post(
                             f"{self.api_url}/workflows/{workflow_id}/activate",
                             headers=self.headers,
                             timeout=self.timeout
                         )
                         
-                        response.raise_for_status()
-                        
-                        # Wait for activation to complete
-                        await asyncio.sleep(2)
-                        
-                        # Verify activation
-                        current_state = await self.get_workflow(workflow_id)
-                        if not current_state or not current_state.get('active'):
-                            if attempt == self.max_retries - 1:
-                                raise HTTPException(
-                                    status_code=500,
-                                    detail="Workflow activation could not be verified"
-                                )
-                            continue
-                        
-                        # If workflow has webhook nodes, ensure they are properly registered
-                        if has_webhook:
-                            # Wait longer for webhook registration
-                            await asyncio.sleep(5)
-                            
-                            # Get webhook URL
-                            webhook_url = await self.get_webhook_url(workflow_id)
-                            if not webhook_url:
-                                if attempt == self.max_retries - 1:
-                                    raise HTTPException(
-                                        status_code=500,
-                                        detail="Failed to get webhook URL after activation"
-                                    )
-                                continue
-                            
-                            # Test webhook with exponential backoff
-                            max_webhook_retries = 5
-                            webhook_registered = False
-                            
-                            for webhook_attempt in range(max_webhook_retries):
-                                try:
-                                    # Test webhook with minimal payload
-                                    test_response = await client.post(
-                                        webhook_url,
-                                        json={"test": True},
-                                        timeout=self.timeout
-                                    )
-                                    
-                                    if test_response.status_code != 404:
-                                        webhook_registered = True
-                                        break
-                                    
-                                    # If we get a 404, wait and retry
-                                    wait_time = min(30, 2 ** webhook_attempt)
-                                    logger.info(f"Waiting {wait_time}s for webhook registration...")
-                                    await asyncio.sleep(wait_time)
-                                    
-                                except Exception as e:
-                                    logger.warning(f"Webhook test attempt {webhook_attempt + 1} failed: {str(e)}")
-                                    if webhook_attempt == max_webhook_retries - 1:
-                                        logger.error("Max webhook test retries reached")
-                                        break
-                                    await asyncio.sleep(2 ** webhook_attempt)
-                            
-                            if not webhook_registered and attempt == self.max_retries - 1:
-                                # On final attempt, if webhook isn't registered, deactivate and reactivate
-                                try:
-                                    await self.deactivate_workflow(workflow_id)
-                                    await asyncio.sleep(2)
-                                    await client.post(
-                                        f"{self.api_url}/workflows/{workflow_id}/activate",
-                                        headers=self.headers,
-                                        timeout=self.timeout
-                                    )
-                                except Exception as e:
-                                    logger.error(f"Final webhook registration attempt failed: {str(e)}")
-                                    raise HTTPException(
-                                        status_code=500,
-                                        detail="Failed to register webhook after multiple attempts"
-                                    )
-                        
-                        logger.info(f"Successfully activated workflow {workflow_id}")
-                        return True
-                        
-                    except httpx.HTTPStatusError as e:
-                        if e.response.status_code == 409:
-                            # Workflow is already active
-                            logger.info(f"Workflow {workflow_id} is already active")
+                        try:
+                            response.raise_for_status()
+                            logger.info(f"Successfully activated workflow {workflow_id}")
                             return True
+                        except httpx.HTTPError as e:
+                            if attempt == self.max_retries - 1:
+                                logger.error(f"Failed to activate workflow after {self.max_retries} attempts")
+                                raise HTTPException(
+                                    status_code=e.response.status_code if hasattr(e, 'response') else 500,
+                                    detail=f"Error activating workflow: {str(e)}"
+                                )
+                            logger.warning(f"Activation attempt {attempt + 1} failed, retrying...")
+                            await asyncio.sleep(2 ** attempt)
                             
-                        elif attempt == self.max_retries - 1:
-                            # Last attempt failed
-                            raise HTTPException(
-                                status_code=e.response.status_code,
-                                detail=f"Error activating workflow: {e.response.text}"
-                            )
-                        
-                        # Wait before retrying
-                        await asyncio.sleep(self.retry_delay * (2 ** attempt))
-                        continue
-                        
                     except Exception as e:
                         if attempt == self.max_retries - 1:
+                            logger.error(f"Failed to activate workflow after {self.max_retries} attempts")
                             raise HTTPException(
                                 status_code=500,
                                 detail=f"Error activating workflow: {str(e)}"
                             )
-                        await asyncio.sleep(self.retry_delay * (2 ** attempt))
-                        continue
-            
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to activate workflow after {self.max_retries} attempts"
-            )
-            
+                        logger.warning(f"Activation attempt {attempt + 1} failed, retrying...")
+                        await asyncio.sleep(2 ** attempt)
+                
+                return False
+                
         except HTTPException:
             raise
         except Exception as e:
@@ -853,73 +746,15 @@ class N8nService:
     
     async def get_webhook_url(self, workflow_id: Union[str, int]) -> Optional[str]:
         """Get the webhook URL for a workflow if it has a webhook trigger node.
+        This method always returns None since all trigger nodes are transformed to executeWorkflow nodes.
         
         Args:
             workflow_id: The ID of the workflow
             
         Returns:
-            The webhook URL if found, None otherwise
+            None since webhooks are not used
         """
-        try:
-            workflow = await self.get_workflow(workflow_id)
-            if not workflow:
-                logger.warning(f"Workflow {workflow_id} not found when getting webhook URL")
-                return None
-            
-            logger.debug(f"Retrieved workflow configuration for {workflow_id}: {json.dumps(workflow, indent=2)}")
-            
-            # Check if workflow has webhook trigger node
-            webhook_nodes = [
-                node for node in workflow.get('nodes', [])
-                if node.get('type') == 'n8n-nodes-base.webhook'
-            ]
-            
-            if not webhook_nodes:
-                logger.warning(f"No webhook nodes found in workflow {workflow_id}. Available nodes: {[node.get('type') for node in workflow.get('nodes', [])]}")
-                return None
-            
-            # Get the first webhook node (n8n typically only uses one webhook trigger)
-            webhook_node = webhook_nodes[0]
-            logger.debug(f"Found webhook node in workflow {workflow_id}: {json.dumps(webhook_node, indent=2)}")
-            
-            # Get webhook path from parameters, checking all possible locations
-            parameters = webhook_node.get('parameters', {})
-            logger.debug(f"Webhook node parameters for workflow {workflow_id}: {json.dumps(parameters, indent=2)}")
-            
-            # Check different possible parameter paths for the webhook path
-            webhook_path = None
-            path_locations = {
-                'path': parameters.get('path'),
-                'endpoint': parameters.get('endpoint'),
-                'webhookEndpoint': parameters.get('webhookEndpoint'),
-                'options.path': parameters.get('options', {}).get('path')
-            }
-            
-            # Log all potential path locations
-            logger.debug(f"Checking webhook path locations for workflow {workflow_id}: {json.dumps(path_locations, indent=2)}")
-            
-            for location, value in path_locations.items():
-                if value:
-                    webhook_path = value
-                    logger.info(f"Found webhook path in '{location}' parameter: {value}")
-                    break
-            
-            if not webhook_path:
-                webhook_path = 'webhook'
-                logger.warning(f"No webhook path found in any location, using default: {webhook_path}")
-            
-            webhook_path = webhook_path.lstrip('/')  # Remove leading slash if present
-            
-            # Construct webhook URL using the base URL without /api/v1
-            base_url = self.api_url.replace('/api/v1', '')
-            webhook_url = f"{base_url}/webhook/{workflow_id}/{webhook_path}"
-            
-            logger.info(f"Generated webhook URL for workflow {workflow_id}: {webhook_url}")
-            return webhook_url
-            
-        except Exception as e:
-            logger.error(f"Error getting webhook URL for workflow {workflow_id}: {str(e)}", exc_info=True)
-            return None
+        return None
 
     async def execute_workflow(self, workflow_id: Union[str, int], data: Dict[str, Any]) -> Dict[str, Any]:
         """Execute a workflow with the given data.
@@ -944,145 +779,67 @@ class N8nService:
                     detail=f"Workflow {workflow_id} not found"
                 )
             
-            logger.info(f"Retrieved workflow {workflow_id} configuration")
-            
-            # Check if this is a webhook-triggered workflow
-            webhook_nodes = [
-                node for node in workflow.get('nodes', [])
-                if node.get('type') == 'n8n-nodes-base.webhook'
-            ]
-            has_webhook = bool(webhook_nodes)
+            # Check if workflow is active
+            is_active = workflow.get("active", False)
             
             # If not active, activate it first
-            if not workflow.get("active", False):
+            if not is_active:
                 logger.info(f"Activating workflow {workflow_id}")
                 await self.activate_workflow(workflow_id)
             else:
                 logger.info(f"Workflow {workflow_id} is already active")
             
-            # Get webhook URL if this is a webhook-triggered workflow
-            webhook_url = None
-            if has_webhook:
-                webhook_url = await self.get_webhook_url(workflow_id)
-                if not webhook_url:
-                    raise HTTPException(
-                        status_code=500,
-                        detail="Failed to get webhook URL"
-                    )
-                logger.info(f"Using webhook URL: {webhook_url}")
-                
-                # Get the configured HTTP method
-                webhook_node = webhook_nodes[0]
-                parameters = webhook_node.get('parameters', {})
-                http_method = parameters.get('httpMethod', 'POST')
-                logger.info(f"Using HTTP method from webhook configuration: {http_method}")
+            # Execute the workflow
+            execute_url = f"{self.api_url}/api/v1/workflows/{workflow_id}/run"
+            logger.info(f"Sending POST request to execute URL: {execute_url}")
+            
+            headers = {
+                "accept": "application/json",
+                "X-N8N-API-KEY": self.api_key,
+                "Content-Type": "application/json"
+            }
             
             async with httpx.AsyncClient() as client:
-                if webhook_url:
-                    # For webhook-triggered workflows, send request to webhook URL
-                    logger.info(f"Sending {http_method} request to webhook URL: {webhook_url}")
-                    response = await client.request(
-                        method=http_method,
-                        url=webhook_url,
-                        json=data,
-                        headers={'Content-Type': 'application/json'},
-                        timeout=self.timeout
-                    )
-                else:
-                    # For regular workflows, use execute endpoint
-                    execute_url = f"{self.api_url}/workflows/{workflow_id}/execute"
-                    logger.info(f"Sending POST request to execute URL: {execute_url}")
-                    response = await client.post(
-                        execute_url,
-                        headers=self.headers,
-                        json={"data": data},
-                        timeout=self.timeout
-                    )
+                response = await client.post(
+                    execute_url,
+                    headers=headers,
+                    json={"data": data},
+                    timeout=30.0
+                )
                 
                 if response.status_code == 404:
-                    error_msg = f"Endpoint not found: {webhook_url if webhook_url else execute_url}"
-                    logger.error(error_msg)
+                    # If 404, try reactivating the workflow
+                    logger.info("Workflow returned 404, attempting to reactivate workflow")
+                    workflow = await self.get_workflow(workflow_id)
+                    await self.activate_workflow(workflow_id)
                     
-                    if webhook_url:
-                        # If webhook returns 404, try re-registering the webhook
-                        logger.info("Webhook returned 404, attempting to reactivate workflow")
-                        await self.activate_workflow(workflow_id)
-                        # Wait a moment for activation
-                        await asyncio.sleep(1)
-                        
-                        # Try the request again
-                        response = await client.request(
-                            method=http_method,
-                            url=webhook_url,
-                            json=data,
-                            headers={'Content-Type': 'application/json'},
-                            timeout=self.timeout
-                        )
-                    else:
-                        raise HTTPException(
-                            status_code=404,
-                            detail=error_msg
-                        )
-                
-                try:
-                    response.raise_for_status()
-                except httpx.HTTPError as e:
-                    logger.error(f"HTTP error executing workflow: {str(e)}")
-                    if hasattr(e, 'response'):
-                        logger.error(f"Response status: {e.response.status_code}")
-                        logger.error(f"Response body: {e.response.text}")
-                    raise HTTPException(
-                        status_code=e.response.status_code if hasattr(e, 'response') else 500,
-                        detail=f"Error executing workflow: {str(e)}"
+                    # Try execution again after reactivation
+                    response = await client.post(
+                        execute_url,
+                        headers=headers,
+                        json={"data": data},
+                        timeout=30.0
                     )
                 
-                try:
-                    result = response.json()
-                except json.JSONDecodeError:
-                    logger.error(f"Invalid JSON response: {response.text}")
+                if response.status_code >= 400:
+                    logger.error(f"HTTP error executing workflow: {response.text}")
+                    logger.error(f"Response status: {response.status_code}")
+                    logger.error(f"Response body: {response.text}")
                     raise HTTPException(
-                        status_code=500,
-                        detail="Invalid response format from n8n"
+                        status_code=response.status_code,
+                        detail=f"Error executing workflow: {response.text}"
                     )
                 
-                if not isinstance(result, dict):
-                    error_msg = "Invalid response from n8n API: not a JSON object"
-                    logger.error(error_msg)
-                    raise HTTPException(
-                        status_code=500,
-                        detail=error_msg
-                    )
+                return response.json()
                 
-                # n8n returns the result in a specific format
-                if "data" in result:
-                    # Success case - return the data
-                    logger.info(f"Successfully executed workflow {workflow_id}")
-                    return {
-                        "success": True,
-                        "execution_id": result.get("executionId"),
-                        "data": result.get("data")
-                    }
-                elif "error" in result:
-                    # Error case - raise exception with error details
-                    error_message = result["error"].get("message", str(result["error"]))
-                    logger.error(f"Workflow execution failed: {error_message}")
-                    raise HTTPException(
-                        status_code=500,
-                        detail=f"Workflow execution failed: {error_message}"
-                    )
-                else:
-                    # Unexpected response format
-                    error_msg = f"Unexpected response format from n8n: {result}"
-                    logger.error(error_msg)
-                    raise HTTPException(
-                        status_code=500,
-                        detail=error_msg
-                    )
-                
-        except HTTPException:
-            raise
+        except httpx.HTTPError as e:
+            logger.error(f"HTTP error executing workflow: {str(e)}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error executing workflow: {str(e)}"
+            )
         except Exception as e:
-            logger.error(f"Error executing workflow {workflow_id}: {str(e)}")
+            logger.error(f"Error executing workflow: {str(e)}")
             raise HTTPException(
                 status_code=500,
                 detail=f"Error executing workflow: {str(e)}"

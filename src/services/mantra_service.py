@@ -76,27 +76,20 @@ class MantraService:
                 logger.error(f"Invalid workflow JSON: {workflow_json}")
                 raise ValueError("Invalid workflow JSON: must contain 'nodes' field")
             
-            # Check if workflow contains Google service nodes
-            contains_google_nodes = False
-            google_service_types = ['gmail', 'googlecalendar', 'googledrive', 'googlesheets']
+            # First transform the workflow to convert all trigger nodes to executeWorkflow nodes
+            logger.info("Transforming workflow to convert trigger nodes to executeWorkflow nodes")
+            transformer = GoogleWorkflowTransformer()
+            workflow_json = transformer.transform_workflow(workflow_json)
             
-            for node in workflow_json.get('nodes', []):
-                if node.get('type', '').lower() in google_service_types:
-                    contains_google_nodes = True
-                    break
-            
-            # Transform workflow if it contains Google service nodes
-            if contains_google_nodes:
-                logger.info("Workflow contains Google service nodes. Applying transformation.")
-                transformer = GoogleWorkflowTransformer()
-                workflow_json = transformer.transform_workflow(workflow_json)
-            
-            # Now validate the (potentially transformed) workflow
+            # Then validate the workflow structure after transformation
             try:
                 self.n8n_service._validate_workflow_structure(workflow_json)
-            except Exception as e:
+            except ValueError as e:
                 logger.error(f"Workflow validation failed: {str(e)}")
-                raise ValueError(f"Invalid workflow structure: {str(e)}")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=str(e)
+                )
             
             # Create new mantra
             mantra = Mantra(
@@ -118,7 +111,10 @@ class MantraService:
 
         except ValueError as e:
             logger.error(f"Validation error in create_mantra: {str(e)}")
-            raise
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(e)
+            )
         except SQLAlchemyError as e:
             await self.db_session.rollback()
             logger.error(f"Database error in create_mantra: {str(e)}", exc_info=True)

@@ -11,6 +11,10 @@ from typing import List, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 import logging
+from sqlalchemy import select
+from sqlalchemy.sql import and_
+from sqlalchemy.ext.asyncio import AsyncSession
+from datetime import datetime
 
 from src.utils.database import get_db
 from src.models.google_integration import GoogleIntegration
@@ -218,39 +222,40 @@ async def delete_google_integration(
         )
 
 @router.get("/status")
-async def get_integration_status(request: Request, db: Session = Depends(get_db)):
-    """Check if user has an active Google integration."""
+async def get_integration_status(request: Request, db: AsyncSession = Depends(get_db)):
+    """Get the status of the user's Google integration."""
     try:
-        # Get user from session
-        user = request.session.get("user")
-        if not user:
-            return JSONResponse({
-                "is_connected": False,
-                "message": "Not logged in"
-            })
+        # Check if user is logged in
+        if "user" not in request.session:
+            raise HTTPException(status_code=401, detail="Not authenticated")
 
-        # Check for active integration
-        integration = db.query(GoogleIntegration).filter(
-            GoogleIntegration.email == user.get("email"),
-            GoogleIntegration.status == "connected"
-        ).first()
+        user = request.session["user"]
+        user_id = user.get("id")
 
-        if integration:
-            return JSONResponse({
-                "is_connected": True,
-                "email": integration.email,
-                "status": integration.status,
-                "connected_at": integration.created_at.isoformat() if integration.created_at else None
-            })
-        else:
-            return JSONResponse({
-                "is_connected": False,
-                "message": "No active Google integration found"
-            })
+        # Get integration status from database
+        query = select(GoogleIntegration).where(
+            GoogleIntegration.user_id == user_id,
+            GoogleIntegration.is_active == True
+        )
+        result = await db.execute(query)
+        integration = result.scalar_one_or_none()
 
+        if not integration:
+            raise HTTPException(status_code=404, detail="Google integration not found")
+
+        return {
+            "id": integration.id,
+            "email": integration.email,
+            "is_active": integration.is_active,
+            "status": integration.status,
+            "created_at": integration.created_at.isoformat()
+        }
+
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error checking Google integration status: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Unexpected error in get_google_integration: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/disconnect")
 async def disconnect_integration(request: Request, db: Session = Depends(get_db)):
@@ -261,18 +266,21 @@ async def disconnect_integration(request: Request, db: Session = Depends(get_db)
         if not user:
             raise HTTPException(status_code=401, detail="Not logged in")
 
-        # Find active integration
-        integration = db.query(GoogleIntegration).filter(
-            GoogleIntegration.email == user.get("email"),
-            GoogleIntegration.status == "connected"
-        ).first()
+        # Find active integration using async syntax
+        result = await db.execute(
+            select(GoogleIntegration).where(
+                GoogleIntegration.email == user.get("email"),
+                GoogleIntegration.status == "connected"
+            )
+        )
+        integration = result.scalar_one_or_none()
 
         if not integration:
             raise HTTPException(status_code=404, detail="No active Google integration found")
 
         # Update integration status
         integration.status = "disconnected"
-        db.commit()
+        await db.commit()
 
         return JSONResponse({
             "success": True,

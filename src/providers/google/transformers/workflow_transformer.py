@@ -43,7 +43,17 @@ class GoogleWorkflowTransformer:
             # Clear previous metadata
             self._node_metadata = {}
             
-            for node in nodes:
+            # First pass: identify and transform trigger nodes
+            trigger_nodes = [node for node in nodes if self._is_trigger_node(node)]
+            non_trigger_nodes = [node for node in nodes if not self._is_trigger_node(node)]
+            
+            # Transform trigger nodes to "executed by other workflow" triggers
+            for node in trigger_nodes:
+                transformed_node = self._transform_trigger_node(node)
+                transformed_nodes.append(transformed_node)
+            
+            # Transform remaining nodes
+            for node in non_trigger_nodes:
                 node_type = node.get('type', '').lower()
                 if node_type in self.supported_nodes:
                     transformed_node = self.supported_nodes[node_type](node)
@@ -73,6 +83,42 @@ class GoogleWorkflowTransformer:
     def get_node_metadata(self, node_id: str) -> Optional[Dict[str, Any]]:
         """Get Google-specific metadata for a node."""
         return self._node_metadata.get(node_id)
+    
+    def _is_trigger_node(self, node: Dict[str, Any]) -> bool:
+        """Check if a node is a trigger node."""
+        node_type = node.get('type', '').lower()
+        return 'trigger' in node_type or node_type == 'n8n-nodes-base.webhook'
+    
+    def _transform_trigger_node(self, node: Dict[str, Any]) -> Dict[str, Any]:
+        """Transform any trigger node (including webhooks) to an 'executed by other workflow' trigger."""
+        node_id = str(node.get('id', ''))
+        node_name = node.get('name', 'Workflow Trigger')
+        
+        # Store metadata about the original trigger
+        self._node_metadata[node_id] = {
+            'original_type': node.get('type'),
+            'original_parameters': node.get('parameters', {}),
+            'transformed_type': 'n8n-nodes-base.executeWorkflow'
+        }
+        
+        # Convert all trigger nodes to executeWorkflow
+        return {
+            'id': node_id,
+            'name': node_name,
+            'type': 'n8n-nodes-base.executeWorkflow',
+            'parameters': {
+                'workflowId': '',  # Will be set by the executing workflow
+                'executionMode': 'manually',
+                'triggerTimes': '1',
+                'arguments': {
+                    'name': node_name,
+                    'original_type': node.get('type'),
+                    'original_parameters': json.dumps(node.get('parameters', {}))
+                }
+            },
+            'typeVersion': 1,
+            'position': node.get('position', [0, 0])
+        }
     
     def _transform_gmail_node(self, node: Dict[str, Any]) -> Dict[str, Any]:
         """Transform Gmail node operations."""

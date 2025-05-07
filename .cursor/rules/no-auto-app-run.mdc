@@ -3,27 +3,41 @@ description: "This rule prevents running the application without explicit user p
 alwaysApply: true
 ---
 
-# No Automatic App Running
+description: Never automatically restart or run the application without explicit user permission
+alwaysApply: true
 
-## Purpose
-- Prevent running the application without explicit user permission
-- Avoid port conflicts and multiple instances
-- Ensure user has control over app execution
+# No Automatic App Running/Restarting
 
-## Implementation
-- Never run the application automatically
-- Always ask for permission before running
-- Check if app is already running before suggesting to run
+## Core Rules
+- NEVER automatically restart the application
+- NEVER run the application without explicit user request
+- NEVER kill processes without user permission
+- NEVER assume port availability
 
-## Exceptions
-None. All application runs must be explicitly requested by the user.
+## When Making Changes
+1. Make all necessary code changes first
+2. Let the user decide when to restart
+3. If changes require restart, simply inform user
+4. Never use commands like:
+   - python app.py
+   - kill -9
+   - lsof -i :port
+   Without explicit user request
 
-## Alternative Approaches
-1. Suggest checking app status instead
-2. Provide instructions for manual startup
-3. Help with debugging without restarting
+## Instead Do
+1. Make code changes
+2. Inform user changes are complete
+3. Let user handle any restarts
+4. Let user manage running processes
 
-## Safety Notes
-- Multiple instances can cause port conflicts
-- Unexpected restarts may disrupt active sessions
-- Always verify app status before suggesting actions
+## Error Handling
+- If port conflicts occur, inform user
+- If changes need restart, inform user
+- Let user decide how to handle running instances
+- Never attempt automatic fixes for runtime issues
+
+## Absolutely Forbidden
+- Automatic app restarts
+- Killing processes automatically
+- Running app after changes
+- Port conflict auto-resolution

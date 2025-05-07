@@ -209,12 +209,11 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
         AsyncSession: A database session
     """
     adapter = await DatabaseAdapterFactory.get_adapter()
-    session_cm = await adapter.get_session()
-    async with session_cm as session:
-        try:
-            yield session
-        finally:
-            await session.close()
+    session = await adapter.get_session()
+    try:
+        yield session
+    finally:
+        await session.close()
 
 async def init_db() -> None:
     """Initialize the database connection.
@@ -235,7 +234,11 @@ async def init_db() -> None:
             logger.info(f"Max overflow: {os.getenv('MAX_OVERFLOW', '10')}")
 
         # Initialize the database adapter
-        await DatabaseAdapterFactory.get_adapter()
+        adapter = await DatabaseAdapterFactory.get_adapter()
+        
+        # Create tables if they don't exist
+        async with adapter.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
 
     except Exception as e:
         logger.error(f"Error initializing database: {str(e)}")

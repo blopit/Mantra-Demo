@@ -148,9 +148,8 @@ async def get_auth_url(
         # Generate state parameter
         state = str(uuid.uuid4())
         
-        # Store state in session
-        request.session["state"] = state
-        logger.info(f"Generated auth URL with state: {state}")
+        # Store state in session using update()
+        request.session.update({"oauth_state": state})
         
         # Generate authorization URL with specified parameters
         authorization_url, _ = flow.authorization_url(
@@ -179,7 +178,7 @@ async def google_callback(
     """Handle Google OAuth callback."""
     try:
         # Verify state to prevent CSRF
-        stored_state = request.session.get("state")
+        stored_state = request.session.get("oauth_state")
         logger.info(f"Verifying state: received={state}, stored={stored_state}")
         
         if not stored_state:
@@ -189,6 +188,9 @@ async def google_callback(
         if stored_state != state:
             logger.error(f"Invalid state parameter: received={state}, expected={stored_state}")
             return RedirectResponse(url="/signin?error=Invalid state parameter", status_code=307)
+        
+        # Clear the state from session after verification using update()
+        request.session.update({"oauth_state": None})
         
         # Get token from Google
         logger.info(f"Getting token from Google with code: {code[:10]}...")
@@ -225,14 +227,16 @@ async def google_callback(
             await db.refresh(user)
             logger.info(f"Created new user with ID: {user.id}")
         
-        # Store user info in session
-        request.session["user_id"] = user.id
-        request.session["user"] = {
-            "id": user.id,
-            "email": user.email,
-            "name": user.name,
-            "picture": user.profile_picture
-        }
+        # Store user info in session using update()
+        request.session.update({
+            "user_id": user.id,
+            "user": {
+                "id": user.id,
+                "email": user.email,
+                "name": user.name,
+                "picture": user.profile_picture
+            }
+        })
         
         # Find existing integration
         integration_result = await db.execute(

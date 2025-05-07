@@ -11,6 +11,7 @@ from typing import List, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 import logging
+from sqlalchemy import select, and_
 
 from ..utils.database import get_db
 from ..models.google_integration import GoogleIntegration
@@ -28,7 +29,9 @@ async def get_google_integration_list(
 ):
     """Retrieve all Google integrations"""
     try:
-        items = db.query(GoogleIntegration).offset(skip).limit(limit).all()
+        stmt = select(GoogleIntegration).offset(skip).limit(limit)
+        result = await db.execute(stmt)
+        items = result.scalars().all()
         return items
     except SQLAlchemyError as e:
         logger.error(f"Database error in get_google_integration_list: {e}")
@@ -45,11 +48,14 @@ async def get_google_integration(
 ):
     """Retrieve a specific Google integration by ID"""
     try:
-        item = db.query(GoogleIntegration).filter(GoogleIntegration.id == integration_id).first()
+        stmt = select(GoogleIntegration).where(GoogleIntegration.id == integration_id)
+        result = await db.execute(stmt)
+        item = result.scalar_one_or_none()
+        
         if item is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="GoogleIntegration not found"
+                detail="Google integration not found"
             )
         return item
     except SQLAlchemyError as e:
@@ -60,20 +66,20 @@ async def get_google_integration(
         )
 
 
-@router.post("/", response_model=GoogleIntegrationResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=GoogleIntegrationResponse)
 async def create_google_integration(
     item_data: GoogleIntegrationCreate,
     db: Session = Depends(get_db)
 ):
     """Create a new Google integration"""
     try:
-        new_item = GoogleIntegration(**item_data.dict())
-        db.add(new_item)
-        db.commit()
-        db.refresh(new_item)
-        return new_item
+        db_item = GoogleIntegration(**item_data.dict())
+        db.add(db_item)
+        await db.commit()
+        await db.refresh(db_item)
+        return db_item
     except SQLAlchemyError as e:
-        db.rollback()
+        await db.rollback()
         logger.error(f"Database error in create_google_integration: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -89,24 +95,25 @@ async def update_google_integration(
 ):
     """Update an existing Google integration"""
     try:
-        item = db.query(GoogleIntegration).filter(GoogleIntegration.id == integration_id).first()
-        if item is None:
+        stmt = select(GoogleIntegration).where(GoogleIntegration.id == integration_id)
+        result = await db.execute(stmt)
+        db_item = result.scalar_one_or_none()
+        
+        if db_item is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="GoogleIntegration not found"
+                detail="Google integration not found"
             )
-            
-        # Update fields if provided in the request
-        update_data = item_update.dict(exclude_unset=True)
-        for field, value in update_data.items():
-            if value is not None:  # Skip None values
-                setattr(item, field, value)
-                
-        db.commit()
-        db.refresh(item)
-        return item
+        
+        # Update fields
+        for field, value in item_update.dict(exclude_unset=True).items():
+            setattr(db_item, field, value)
+        
+        await db.commit()
+        await db.refresh(db_item)
+        return db_item
     except SQLAlchemyError as e:
-        db.rollback()
+        await db.rollback()
         logger.error(f"Database error in update_google_integration: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -114,25 +121,28 @@ async def update_google_integration(
         )
 
 
-@router.delete("/{integration_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{integration_id}")
 async def delete_google_integration(
     integration_id: str,
     db: Session = Depends(get_db)
 ):
     """Delete a Google integration"""
     try:
-        item = db.query(GoogleIntegration).filter(GoogleIntegration.id == integration_id).first()
-        if item is None:
+        stmt = select(GoogleIntegration).where(GoogleIntegration.id == integration_id)
+        result = await db.execute(stmt)
+        db_item = result.scalar_one_or_none()
+        
+        if db_item is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="GoogleIntegration not found"
+                detail="Google integration not found"
             )
-            
-        db.delete(item)
-        db.commit()
-        return None
+        
+        await db.delete(db_item)
+        await db.commit()
+        return {"message": "Google integration deleted successfully"}
     except SQLAlchemyError as e:
-        db.rollback()
+        await db.rollback()
         logger.error(f"Database error in delete_google_integration: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
