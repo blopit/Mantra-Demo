@@ -1,0 +1,8 @@
+# Exclude specific files from secret scanning
+transformed_workflow.json merge=binary
+tests/fixtures/test_workflow.json merge=binary
+scripts/simple_transform.py merge=binary
+direct_transform.py merge=binary
+standalone_transform.py merge=binary
+test_oauth_token.py merge=binary
+basic_transform.py merge=binary 
